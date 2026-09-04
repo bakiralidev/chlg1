@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: challenge_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: challenge_user
+      POSTGRES_PASSWORD: challenge_pass
+      POSTGRES_DB: challenge_db
+    ports:
+      - "5434:5432"       # 5434 → lokal portlar bilan to'qnashmaydi
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

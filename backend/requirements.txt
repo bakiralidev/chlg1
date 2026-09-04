@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+sqlalchemy[asyncio]
+asyncpg
+alembic
+python-dotenv
+passlib
+bcrypt<4.0.0
+pyjwt
+pydantic[email]
+pydantic-settings
+redis
+docker
+apscheduler
+aiosmtplib
