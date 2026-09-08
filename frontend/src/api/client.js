@@ -57,16 +57,22 @@ export const api = {
     client.post(`/api/v1/sessions/${sessionId}/submit`, { code }),
 
   // Leaderboard
-  getLeaderboard: (challengeId) => client.get(`/api/v1/leaderboard/${challengeId}`),
+  getLeaderboard: (challengeId) => client.get(`/api/v1/challenges/${challengeId}/leaderboard`),
 
   // Admin
   getAdminChallenges: () => client.get('/api/admin/challenges'),
+  getAdminChallenge: (id) => client.get(`/api/admin/challenges/${id}`),
   createChallenge: (data) => client.post('/api/admin/challenges', data),
   updateChallenge: (id, data) => client.put(`/api/admin/challenges/${id}`, data),
+  deleteChallenge: (id) => client.delete(`/api/admin/challenges/${id}`),
   activateChallenge: (id) => client.post(`/api/admin/challenges/${id}/activate`),
+  getDays: (challengeId) => client.get(`/api/admin/challenges/${challengeId}/days`),
   addDay: (data) => client.post('/api/admin/days', data),
+  deleteDay: (dayId) => client.delete(`/api/admin/days/${dayId}`),
+  getQuestions: (dayId) => client.get(`/api/admin/days/${dayId}/questions`),
+  getChallengeQuestions: (challengeId) => client.get(`/api/admin/challenges/${challengeId}/questions`),
   addQuestion: (data) => client.post('/api/admin/questions', data),
   deleteQuestion: (id) => client.delete(`/api/admin/questions/${id}`),
   getChallengeStats: (id) => client.get(`/api/admin/challenges/${id}/stats`),
-  finalizeChallenge: (id) => client.post(`/api/challenges/${id}/finalize`),
+  finalizeChallenge: (id) => client.post(`/api/v1/challenges/${id}/finalize`),
 };

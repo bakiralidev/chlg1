@@ -39,6 +39,34 @@ async def list_challenges(
     return [_challenge_to_dict(c) for c in result.scalars().all()]
 
 
+@router.get("/challenges/{challenge_id}", response_model=ChallengeResponse)
+async def get_challenge(
+    challenge_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin)
+):
+    result = await db.execute(select(Challenge).where(Challenge.id == challenge_id))
+    challenge = result.scalar_one_or_none()
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Challenge topilmadi")
+    return _challenge_to_dict(challenge)
+
+
+@router.delete("/challenges/{challenge_id}")
+async def delete_challenge(
+    challenge_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin)
+):
+    result = await db.execute(select(Challenge).where(Challenge.id == challenge_id))
+    challenge = result.scalar_one_or_none()
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Challenge topilmadi")
+    await db.delete(challenge)
+    await db.commit()
+    return {"message": "Challenge o'chirildi"}
+
+
 @router.put("/challenges/{challenge_id}", response_model=ChallengeResponse)
 async def update_challenge(
     challenge_id: str,
@@ -169,6 +197,21 @@ async def update_day(
     return _day_to_dict(day)
 
 
+@router.delete("/days/{day_id}")
+async def delete_day(
+    day_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin)
+):
+    result = await db.execute(select(ChallengeDay).where(ChallengeDay.id == day_id))
+    day = result.scalar_one_or_none()
+    if not day:
+        raise HTTPException(status_code=404, detail="Kun topilmadi")
+    await db.delete(day)
+    await db.commit()
+    return {"message": "Kun o'chirildi"}
+
+
 # ─── QUESTIONS ────────────────────────────────────────────────
 
 @router.post("/questions", response_model=QuestionResponse, status_code=201)
@@ -216,6 +259,35 @@ async def delete_question(
     await db.delete(question)
     await db.commit()
     return {"message": "Savol o'chirildi"}
+
+
+@router.get("/challenges/{challenge_id}/questions")
+async def list_challenge_questions(
+    challenge_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin)
+):
+    result = await db.execute(
+        select(Question, ChallengeDay.day_number, ChallengeDay.title.label("day_title"))
+        .join(ChallengeDay, Question.challenge_day_id == ChallengeDay.id)
+        .where(ChallengeDay.challenge_id == challenge_id)
+        .order_by(ChallengeDay.day_number, Question.created_at)
+    )
+    rows = result.all()
+    return [
+        {
+            "id": str(r.Question.id),
+            "challenge_day_id": str(r.Question.challenge_day_id),
+            "day_number": r.day_number,
+            "day_title": r.day_title,
+            "title": r.Question.title,
+            "difficulty": r.Question.difficulty,
+            "starter_code": r.Question.starter_code,
+            "test_cases": r.Question.test_cases,
+            "created_at": r.Question.created_at,
+        }
+        for r in rows
+    ]
 
 
 # ─── Helpers ──────────────────────────────────────────────────

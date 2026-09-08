@@ -34,8 +34,22 @@ export default function AdminDashboard() {
     try {
       await api.finalizeChallenge(id);
       toast.success('Challenge yakunlandi!');
+      setChallenges((prev) =>
+        prev.map((c) => c.id === id ? { ...c, status: 'ended' } : c)
+      );
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Xato');
+    }
+  };
+
+  const handleDelete = async (id, name) => {
+    if (!confirm(`"${name}" challengeni butunlay o'chirmoqchimisiz? Barcha kunlar va savollar o'chib ketadi!`)) return;
+    try {
+      await api.deleteChallenge(id);
+      toast.success('Challenge o\'chirildi');
+      setChallenges((prev) => prev.filter((c) => c.id !== id));
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'O\'chirishda xatolik');
     }
   };
 
@@ -132,6 +146,14 @@ export default function AdminDashboard() {
                           🏁 Yakunlash
                         </button>
                       )}
+                      <button
+                        id={`delete-challenge-${ch.id}`}
+                        className="btn btn-ghost"
+                        style={{ fontSize: '0.85rem', padding: '0.4rem 0.75rem', color: 'var(--danger)' }}
+                        onClick={() => handleDelete(ch.id, ch.name)}
+                      >
+                        🗑 O'chirish
+                      </button>
                     </div>
                   </div>
                 </div>

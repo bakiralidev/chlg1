@@ -36,18 +36,9 @@ export default function ChallengeRoadmap() {
       .finally(() => setLoading(false));
   }, [challengeId]);
 
-  const handleEnterDay = async (day) => {
-    setEnteringDay(day.day_number);
-    try {
-      // day_id olish uchun progress dan topamiz — oddiy yechim
-      // Lekin bizda day.id yo'q — serverdan keladi progress da. Kengaytiramiz.
-      toast.error('Arena ochilmoqda...');
-      navigate(`/arena/${challengeId}_day${day.day_number}`);
-    } catch (err) {
-      toast.error('Kira olmadingiz');
-    } finally {
-      setEnteringDay(null);
-    }
+  const handleEnterDay = (day) => {
+    const targetId = day.day_id || `${challengeId}_day${day.day_number}`;
+    navigate(`/arena/${targetId}`);
   };
 
   if (loading) {

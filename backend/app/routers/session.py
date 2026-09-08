@@ -1,4 +1,5 @@
 import random
+import uuid
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -113,6 +114,7 @@ async def my_progress(
             total_my_score += score
 
         day_statuses.append(MyDayStatus(
+            day_id=str(day.id),
             day_number=day.day_number,
             title=day.title,
             time_limit_secs=day.time_limit_secs,
@@ -143,8 +145,27 @@ async def enter_day(
     current_user: User = Depends(get_current_user)
 ):
     # Kun mavjudligini va bugun ekanligini tekshirish
-    day_result = await db.execute(select(ChallengeDay).where(ChallengeDay.id == day_id))
-    day = day_result.scalar_one_or_none()
+    day = None
+    try:
+        uuid_obj = uuid.UUID(day_id)
+        day_result = await db.execute(select(ChallengeDay).where(ChallengeDay.id == uuid_obj))
+        day = day_result.scalar_one_or_none()
+    except (ValueError, TypeError):
+        if "_day" in str(day_id):
+            parts = str(day_id).split("_day")
+            try:
+                ch_uuid = uuid.UUID(parts[0])
+                d_num = int(parts[1])
+                day_result = await db.execute(
+                    select(ChallengeDay).where(
+                        ChallengeDay.challenge_id == ch_uuid,
+                        ChallengeDay.day_number == d_num
+                    )
+                )
+                day = day_result.scalar_one_or_none()
+            except (ValueError, TypeError):
+                pass
+
     if not day:
         raise HTTPException(status_code=404, detail="Kun topilmadi")
 
@@ -166,7 +187,7 @@ async def enter_day(
     assign_result = await db.execute(
         select(UserQuestionAssignment).where(
             UserQuestionAssignment.user_id == current_user.id,
-            UserQuestionAssignment.challenge_day_id == day_id
+            UserQuestionAssignment.challenge_day_id == day.id
         )
     )
     assignment = assign_result.scalar_one_or_none()
@@ -174,7 +195,7 @@ async def enter_day(
     if not assignment:
         # Random savol tayinlash
         q_result = await db.execute(
-            select(Question).where(Question.challenge_day_id == day_id)
+            select(Question).where(Question.challenge_day_id == day.id)
         )
         questions = q_result.scalars().all()
         if not questions:
@@ -183,7 +204,7 @@ async def enter_day(
         chosen = random.choice(questions)
         assignment = UserQuestionAssignment(
             user_id=current_user.id,
-            challenge_day_id=day_id,
+            challenge_day_id=day.id,
             question_id=chosen.id
         )
         db.add(assignment)

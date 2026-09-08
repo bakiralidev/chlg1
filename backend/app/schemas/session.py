@@ -50,6 +50,7 @@ class SubmitResponse(BaseModel):
 
 
 class MyDayStatus(BaseModel):
+    day_id: Optional[str] = None
     day_number: int
     title: Optional[str]
     time_limit_secs: int

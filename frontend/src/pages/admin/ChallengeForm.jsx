@@ -19,6 +19,33 @@ export default function ChallengeForm() {
   });
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    if (isEdit) {
+      setLoading(true);
+      api.getAdminChallenge(id)
+        .then(({ data }) => {
+          let dateStr = '';
+          if (data.start_date) {
+            const d = new Date(data.start_date);
+            const pad = (n) => String(n).padStart(2, '0');
+            dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+          }
+          setForm({
+            name: data.name || '',
+            description: data.description || '',
+            total_days: data.total_days || 30,
+            start_date: dateStr,
+            prize_info: data.prize_info || '',
+            max_violations: data.max_violations ?? 3,
+          });
+        })
+        .catch(() => {
+          toast.error('Challenge ma\'lumotlarini yuklab bo\'lmadi');
+        })
+        .finally(() => setLoading(false));
+    }
+  }, [id, isEdit]);
+
   const handleChange = (e) => {
     const { name, value, type } = e.target;
     setForm((prev) => ({ ...prev, [name]: type === 'number' ? Number(value) : value }));
@@ -57,6 +84,13 @@ export default function ChallengeForm() {
       <div className="page">
         <div className="container" style={{ paddingTop: '2rem', paddingBottom: '4rem', maxWidth: '640px' }}>
           <div className="fade-in">
+            <button
+              onClick={() => navigate('/admin')}
+              className="btn btn-ghost"
+              style={{ marginBottom: '1rem', padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
+            >
+              ⬅ Admin panelga qaytish
+            </button>
             <h1 style={{ fontSize: '1.6rem', marginBottom: '0.5rem' }}>
               {isEdit ? '✏️ Challengeni tahrirlash' : '+ Yangi Challenge yaratish'}
             </h1>
