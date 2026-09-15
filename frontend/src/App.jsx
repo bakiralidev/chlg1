@@ -19,6 +19,7 @@ import AdminDashboard from './pages/admin/AdminDashboard';
 import ChallengeForm from './pages/admin/ChallengeForm';
 import DayManager from './pages/admin/DayManager';
 import QuestionForm from './pages/admin/QuestionForm';
+import ScoreImport from './pages/admin/ScoreImport';
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -58,7 +59,8 @@ export default function App() {
           <Route path="/admin/challenge/new" element={<ChallengeForm />} />
           <Route path="/admin/challenge/:id/edit" element={<ChallengeForm />} />
           <Route path="/admin/challenge/:id/days" element={<DayManager />} />
-          <Route path="/admin/challenge/:id/questions" element={<QuestionForm />} />
+          <Route path="/admin/challenge/:challengeId/questions" element={<QuestionForm />} />
+          <Route path="/admin/scores" element={<ScoreImport />} />
         </Route>
 
         {/* Fallback */}

@@ -9,12 +9,14 @@ class EnterDayResponse(BaseModel):
     entered_at: datetime
     question_id: str
     question_title: str
-    question_svg: str       # SVG matn
+    question_type: str          # "practical" | "theoretical"
+    question_body: str          # Savol matni
     starter_code: str
     time_limit_secs: int
-    is_readonly: bool       # Avval yuborilgan bo'lsa True
-    previous_code: Optional[str] = None   # is_readonly=True da yuborilgan kod
-    previous_score: Optional[int] = None  # is_readonly=True da ball
+    is_readonly: bool
+    previous_code: Optional[str] = None
+    previous_note: Optional[str] = None
+    previous_score: Optional[int] = None
 
 
 class TypingStartRequest(BaseModel):
@@ -22,7 +24,8 @@ class TypingStartRequest(BaseModel):
 
 
 class AutosaveRequest(BaseModel):
-    code: str
+    code: Optional[str] = None
+    note_content: Optional[str] = None
 
 
 class ViolationRequest(BaseModel):
@@ -37,15 +40,16 @@ class ViolationResponse(BaseModel):
 
 
 class SubmitRequest(BaseModel):
-    code: str
+    code: Optional[str] = None           # Amaliy savol uchun
+    note_content: Optional[str] = None   # Nazariy savol uchun
     keystroke_count: Optional[int] = None
 
 
 class SubmitResponse(BaseModel):
-    result: str           # pass | fail | error | timeout | disqualified
+    result: str           # submitted | disqualified | manual_review
     score: int
-    execution_ms: Optional[int]
-    output: Optional[str]
+    execution_ms: Optional[int] = None
+    output: Optional[str] = None
     message: str
 
 
@@ -55,12 +59,12 @@ class MyDayStatus(BaseModel):
     title: Optional[str]
     time_limit_secs: int
     is_today: bool
-    is_locked: bool        # Kelajakdagi kun
-    is_expired: bool       # O'tib ketgan, hech narsa qilinmagan
-    is_completed: bool     # Yuborilgan
+    is_locked: bool
+    is_expired: bool
+    is_completed: bool
     is_disqualified: bool
-    score: Optional[int]   # Ertasi kuni ko'rinadi
-    opens_on: str          # "2026-09-12" formatida
+    score: Optional[int]
+    opens_on: str
 
 
 class ChallengeProgressResponse(BaseModel):
@@ -68,4 +72,4 @@ class ChallengeProgressResponse(BaseModel):
     challenge_name: str
     total_days: int
     days: list[MyDayStatus]
-    my_total_score: Optional[int]  # Faqat challenge tugagandan keyin
+    my_total_score: Optional[int]

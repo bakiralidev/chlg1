@@ -53,6 +53,23 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleDownloadZip = async (id, name) => {
+    try {
+      toast('ZIP tayyorlanmoqda...', { icon: '📦' });
+      const response = await api.exportSubmissionsZip(id);
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${name.replace(/ /g, '_')}_submissions.zip`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error('ZIP yuklab olishda xato');
+    }
+  };
+
   const STATUS_BADGE = {
     draft:  <span className="badge badge-gray">Draft</span>,
     active: <span className="badge badge-green">Faol</span>,
@@ -69,9 +86,14 @@ export default function AdminDashboard() {
               <h1 style={{ fontSize: '1.8rem', marginBottom: '0.25rem' }}>👑 Admin Panel</h1>
               <p style={{ color: 'var(--text-muted)' }}>Challengelarni boshqarish</p>
             </div>
-            <Link to="/admin/challenge/new" id="create-challenge-btn" className="btn btn-primary">
-              + Yangi Challenge
-            </Link>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+              <Link to="/admin/scores" className="btn btn-secondary">
+                🤖 AI Baholash
+              </Link>
+              <Link to="/admin/challenge/new" id="create-challenge-btn" className="btn btn-primary">
+                + Yangi Challenge
+              </Link>
+            </div>
           </div>
 
           {loading ? (
@@ -165,3 +187,4 @@ export default function AdminDashboard() {
     </>
   );
 }
+

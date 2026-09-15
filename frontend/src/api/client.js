@@ -49,12 +49,14 @@ export const api = {
   enterDay: (dayId) => client.post(`/api/v1/days/${dayId}/enter`),
   typingStart: (sessionId, timestamp) =>
     client.patch(`/api/v1/sessions/${sessionId}/typing-start`, { timestamp }),
-  autosave: (sessionId, code) =>
-    client.patch(`/api/v1/sessions/${sessionId}/autosave`, { code }),
+  // payload: { code?, note_content? }
+  autosave: (sessionId, payload) =>
+    client.patch(`/api/v1/sessions/${sessionId}/autosave`, payload),
   reportViolation: (sessionId, type) =>
     client.post(`/api/v1/sessions/${sessionId}/violation`, { violation_type: type }),
-  submitCode: (sessionId, code) =>
-    client.post(`/api/v1/sessions/${sessionId}/submit`, { code }),
+  // payload: { code?, note_content? }
+  submitCode: (sessionId, payload) =>
+    client.post(`/api/v1/sessions/${sessionId}/submit`, payload),
 
   // Leaderboard
   getLeaderboard: (challengeId) => client.get(`/api/v1/challenges/${challengeId}/leaderboard`),
@@ -75,4 +77,14 @@ export const api = {
   deleteQuestion: (id) => client.delete(`/api/admin/questions/${id}`),
   getChallengeStats: (id) => client.get(`/api/admin/challenges/${id}/stats`),
   finalizeChallenge: (id) => client.post(`/api/v1/challenges/${id}/finalize`),
+  // ZIP export
+  exportSubmissionsZip: (challengeId) =>
+    client.get(`/api/admin/challenges/${challengeId}/export-zip`, { responseType: "blob" }),
+  // Excel AI score import
+  importAIScores: (challengeId, formData) =>
+    client.post(`/api/admin/challenges/${challengeId}/import-scores`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+  // AI scores leaderboard
+  getAIScores: (challengeId) => client.get(`/api/admin/challenges/${challengeId}/ai-scores`),
 };

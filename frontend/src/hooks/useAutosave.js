@@ -1,35 +1,37 @@
-import { useEffect, useRef } from 'react';
-import { api } from '../api/client';
+import { useEffect, useRef } from "react";
+import { api } from "../api/client";
 
-/**
- * Autosave hook — kodni 30 soniyada bir backendga saqlaydi
- */
-export function useAutosave({ sessionId, codeRef, enabled = true }) {
-  const lastSaved = useRef('');
+export function useAutosave({ sessionId, codeRef, noteRef, enabled = true }) {
+  const lastSaved = useRef({ code: "", note: "" });
   const intervalRef = useRef(null);
 
   useEffect(() => {
     if (!enabled || !sessionId) return;
 
     const save = async () => {
-      const currentCode = codeRef.current;
-      if (!currentCode || currentCode === lastSaved.current) return;
+      const currentCode = codeRef?.current || null;
+      const currentNote = noteRef?.current || null;
+      const codeChanged = currentCode !== null && currentCode !== lastSaved.current.code;
+      const noteChanged = currentNote !== null && currentNote !== lastSaved.current.note;
+      if (!codeChanged && !noteChanged) return;
 
       try {
-        await api.autosave(sessionId, currentCode);
-        lastSaved.current = currentCode;
-        console.log('[Autosave] Saqlandi:', new Date().toLocaleTimeString());
+        const payload = {};
+        if (codeChanged && currentCode) payload.code = currentCode;
+        if (noteChanged && currentNote) payload.note_content = currentNote;
+        await api.autosave(sessionId, payload);
+        if (codeChanged) lastSaved.current.code = currentCode;
+        if (noteChanged) lastSaved.current.note = currentNote;
+        console.log("[Autosave] Saqlandi:", new Date().toLocaleTimeString());
       } catch (e) {
-        console.warn('[Autosave] Xato:', e.message);
+        console.warn("[Autosave] Xato:", e.message);
       }
     };
 
     intervalRef.current = setInterval(save, 30000);
-
     return () => {
       clearInterval(intervalRef.current);
-      // Chiqishda ham saqlash
       save();
     };
-  }, [sessionId, enabled, codeRef]);
+  }, [sessionId, enabled, codeRef, noteRef]);
 }

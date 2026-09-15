@@ -18,12 +18,11 @@ from app.schemas.session import (
     ChallengeProgressResponse, MyDayStatus
 )
 from app.core.security import get_current_user
-from app.services.sandbox_service import run_code_in_sandbox
 
 router = APIRouter(prefix="/api/v1", tags=["Session"])
 
 
-# ─── Challengelar ro'yxati ────────────────────────────────────
+# --- Challengelar royxati ------------------------------------
 
 @router.get("/challenges")
 async def list_active_challenges(db: AsyncSession = Depends(get_db)):
@@ -47,7 +46,7 @@ async def list_active_challenges(db: AsyncSession = Depends(get_db)):
     ]
 
 
-# ─── Challenge progressi (foydalanuvchi uchun) ───────────────
+# --- Challenge progressi ------------------------------------
 
 @router.get("/challenges/{challenge_id}/my-progress", response_model=ChallengeProgressResponse)
 async def my_progress(
@@ -69,7 +68,6 @@ async def my_progress(
 
     now = datetime.now(timezone.utc)
     today = now.date()
-
     day_statuses = []
     total_my_score = 0
 
@@ -80,7 +78,6 @@ async def my_progress(
         is_locked = day_date > today
         is_expired_no_attempt = day_date < today
 
-        # Bu kun uchun submission bormi?
         sub_q = await db.execute(
             select(Submission)
             .join(ExamSession, Submission.session_id == ExamSession.id)
@@ -93,7 +90,6 @@ async def my_progress(
         )
         submission = sub_q.scalar_one_or_none()
 
-        # Session bormi?
         sess_q = await db.execute(
             select(ExamSession)
             .join(UserQuestionAssignment, ExamSession.assignment_id == UserQuestionAssignment.id)
@@ -107,7 +103,6 @@ async def my_progress(
         is_completed = submission is not None
         is_disqualified = session is not None and session.status == "disqualified"
 
-        # Ball faqat ertasi kundan boshlab ko'rinadi
         show_score = day_date < today
         score = submission.score if (submission and show_score) else None
         if score:
@@ -136,7 +131,7 @@ async def my_progress(
     )
 
 
-# ─── Kunga kirish: random savol tayinlash ────────────────────
+# --- Kunga kirish: random savol tayinlash --------------------
 
 @router.post("/days/{day_id}/enter", response_model=EnterDayResponse)
 async def enter_day(
@@ -144,27 +139,13 @@ async def enter_day(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Kun mavjudligini va bugun ekanligini tekshirish
     day = None
     try:
         uuid_obj = uuid.UUID(day_id)
         day_result = await db.execute(select(ChallengeDay).where(ChallengeDay.id == uuid_obj))
         day = day_result.scalar_one_or_none()
     except (ValueError, TypeError):
-        if "_day" in str(day_id):
-            parts = str(day_id).split("_day")
-            try:
-                ch_uuid = uuid.UUID(parts[0])
-                d_num = int(parts[1])
-                day_result = await db.execute(
-                    select(ChallengeDay).where(
-                        ChallengeDay.challenge_id == ch_uuid,
-                        ChallengeDay.day_number == d_num
-                    )
-                )
-                day = day_result.scalar_one_or_none()
-            except (ValueError, TypeError):
-                pass
+        pass
 
     if not day:
         raise HTTPException(status_code=404, detail="Kun topilmadi")
@@ -181,9 +162,9 @@ async def enter_day(
     if day_date > today:
         raise HTTPException(status_code=403, detail=f"Bu kun hali ochilmagan. {day_date.isoformat()} kuni ochiladi")
     if day_date < today:
-        raise HTTPException(status_code=403, detail="Bu kunning muddati o'tgan")
+        raise HTTPException(status_code=403, detail="Bu kunning muddati otgan")
 
-    # 1. Tayinlov bor/yo'qligini tekshirish
+    # Tayinlov bor/yoqligini tekshirish
     assign_result = await db.execute(
         select(UserQuestionAssignment).where(
             UserQuestionAssignment.user_id == current_user.id,
@@ -193,37 +174,51 @@ async def enter_day(
     assignment = assign_result.scalar_one_or_none()
 
     if not assignment:
-        # Random savol tayinlash
+        # Random savol tayinlash (takrorlanmas va teng taqsimlash)
         q_result = await db.execute(
             select(Question).where(Question.challenge_day_id == day.id)
         )
         questions = q_result.scalars().all()
         if not questions:
-            raise HTTPException(status_code=404, detail="Bu kun uchun savol qo'shilmagan")
+            raise HTTPException(status_code=404, detail="Bu kun uchun savol qoshilmagan")
 
-        chosen = random.choice(questions)
+        # Har bir savol bu kunda necha marta tayinlanganini hisoblash
+        counts_res = await db.execute(
+            select(
+                UserQuestionAssignment.question_id,
+                func.count(UserQuestionAssignment.id)
+            )
+            .where(UserQuestionAssignment.challenge_day_id == day.id)
+            .group_by(UserQuestionAssignment.question_id)
+        )
+        assigned_counts = dict(counts_res.all())
+
+        # Eng kam tayinlangan savollar hovuzidan tasodifiy tanlash
+        min_count = min(assigned_counts.get(q.id, 0) for q in questions)
+        least_assigned_questions = [
+            q for q in questions if assigned_counts.get(q.id, 0) == min_count
+        ]
+        chosen = random.choice(least_assigned_questions)
         assignment = UserQuestionAssignment(
             user_id=current_user.id,
             challenge_day_id=day.id,
             question_id=chosen.id
         )
         db.add(assignment)
-        await db.flush()  # ID olish uchun
+        await db.flush()
 
     # Savolni olish
     q_res = await db.execute(select(Question).where(Question.id == assignment.question_id))
     question = q_res.scalar_one()
 
-    # 2. Faol sessiya bor/yo'qligini tekshirish
+    # Faol sessiya bor/yoqligini tekshirish
     sess_result = await db.execute(
-        select(ExamSession).where(
-            ExamSession.assignment_id == assignment.id
-        )
+        select(ExamSession).where(ExamSession.assignment_id == assignment.id)
     )
     session = sess_result.scalar_one_or_none()
 
     if session:
-        # Sessiya diskvalifikatsiya yoki yuborilgan bo'lsa → readonly
+        # Yuborilgan yoki diskvalifikatsiya
         if session.status in ("disqualified", "submitted", "auto_submitted"):
             sub_res = await db.execute(
                 select(Submission).where(Submission.session_id == session.id)
@@ -237,20 +232,21 @@ async def enter_day(
                 entered_at=session.entered_at,
                 question_id=str(question.id),
                 question_title=question.title,
-                question_svg=question.body_svg,
+                question_type=question.question_type,
+                question_body=question.body_text,
                 starter_code=question.starter_code or "",
                 time_limit_secs=day.time_limit_secs,
                 is_readonly=True,
                 previous_code=session.final_code,
+                previous_note=session.note_content,
                 previous_score=submission.score if submission else 0,
             )
 
         # Vaqt tugaganini tekshirish
         if session.expires_at < now:
-            # Avto-submit
-            if session.final_code:
-                await _do_submit(session, question, session.final_code, db, current_user.id, day_id)
-            session.status = "expired" if not session.final_code else "auto_submitted"
+            if session.final_code or session.note_content:
+                await _do_auto_submit(session, question, db, current_user.id, day.id)
+            session.status = "expired" if not (session.final_code or session.note_content) else "auto_submitted"
             await db.commit()
             return EnterDayResponse(
                 session_id=str(session.id),
@@ -258,11 +254,13 @@ async def enter_day(
                 entered_at=session.entered_at,
                 question_id=str(question.id),
                 question_title=question.title,
-                question_svg=question.body_svg,
+                question_type=question.question_type,
+                question_body=question.body_text,
                 starter_code=question.starter_code or "",
                 time_limit_secs=day.time_limit_secs,
                 is_readonly=True,
                 previous_code=session.final_code,
+                previous_note=session.note_content,
                 previous_score=0,
             )
     else:
@@ -284,14 +282,15 @@ async def enter_day(
         entered_at=session.entered_at,
         question_id=str(question.id),
         question_title=question.title,
-        question_svg=question.body_svg,
+        question_type=question.question_type,
+        question_body=question.body_text,
         starter_code=question.starter_code or "",
         time_limit_secs=day.time_limit_secs,
         is_readonly=False,
     )
 
 
-# ─── Birinchi klavish vaqti ────────────────────────────────────
+# --- Birinchi klavish vaqti ------------------------------------
 
 @router.patch("/sessions/{session_id}/typing-start")
 async def typing_start(
@@ -307,7 +306,7 @@ async def typing_start(
     return {"ok": True}
 
 
-# ─── Avto-saqlash ─────────────────────────────────────────────
+# --- Avto-saqlash ---------------------------------------------
 
 @router.patch("/sessions/{session_id}/autosave")
 async def autosave(
@@ -317,12 +316,15 @@ async def autosave(
     current_user: User = Depends(get_current_user)
 ):
     session = await _get_active_session(session_id, current_user.id, db)
-    session.final_code = data.code
+    if data.code is not None:
+        session.final_code = data.code
+    if data.note_content is not None:
+        session.note_content = data.note_content
     await db.commit()
     return {"ok": True, "saved_at": datetime.now(timezone.utc)}
 
 
-# ─── Buzilish qayd etish ──────────────────────────────────────
+# --- Buzilish qayd etish --------------------------------------
 
 @router.post("/sessions/{session_id}/violation", response_model=ViolationResponse)
 async def report_violation(
@@ -333,13 +335,10 @@ async def report_violation(
 ):
     session = await _get_active_session(session_id, current_user.id, db)
 
-    # Buzilishni log ga yozish
     log = ViolationLog(session_id=session.id, violation_type=data.violation_type)
     db.add(log)
-
     session.violations_count += 1
 
-    # Challenge max_violations olish
     assign_res = await db.execute(
         select(UserQuestionAssignment).where(UserQuestionAssignment.id == session.assignment_id)
     )
@@ -369,7 +368,7 @@ async def report_violation(
     )
 
 
-# ─── Kod yuborish ─────────────────────────────────────────────
+# --- Kod/Note yuborish ----------------------------------------
 
 @router.post("/sessions/{session_id}/submit", response_model=SubmitResponse)
 async def submit_code(
@@ -392,29 +391,40 @@ async def submit_code(
         select(UserQuestionAssignment).where(UserQuestionAssignment.id == session.assignment_id)
     )
     assignment = assign_res.scalar_one()
-    question = await db.execute(select(Question).where(Question.id == assignment.question_id))
-    question = question.scalar_one()
-    day = await db.execute(select(ChallengeDay).where(ChallengeDay.id == assignment.challenge_day_id))
-    day = day.scalar_one()
+    question_res = await db.execute(select(Question).where(Question.id == assignment.question_id))
+    question = question_res.scalar_one()
+    day_res = await db.execute(select(ChallengeDay).where(ChallengeDay.id == assignment.challenge_day_id))
+    day = day_res.scalar_one()
 
-    # Docker sandbox da kodni baholash
-    result = await run_code_in_sandbox(data.code, question.test_cases)
+    # Sarflangan vaqt hisoblash
+    time_spent = None
+    if session.typing_started_at:
+        delta = now - session.typing_started_at
+        time_spent = int(delta.total_seconds())
 
-    # Ball hisoblash (10 ballik tizim)
-    passed = result.get("passed", 0)
-    total = result.get("total", 1)
-    score = round((passed / total) * 10) if total > 0 else 0
+    # Fayl mazmunini shakllantirish
+    file_content = _build_submission_file(
+        question=question,
+        day=day,
+        user=current_user,
+        session=session,
+        code=data.code,
+        note_content=data.note_content,
+        submitted_at=now,
+        time_spent=time_spent,
+    )
 
-    # Submission yozish
+    # Submission yozish  -  Docker yo'q, manual_review
     submission = Submission(
         session_id=session.id,
         user_id=current_user.id,
         challenge_day_id=day.id,
+        submission_type=question.question_type,
         code=data.code,
-        result=result.get("status", "error"),
-        score=score,
-        execution_ms=result.get("execution_ms"),
-        docker_output=result.get("output"),
+        note_content=data.note_content,
+        file_content=file_content,
+        result="manual_review",  # AI tomonidan baholanadi
+        score=0,  # Excel import bilan keyinroq to'ldiriladi
     )
     db.add(submission)
 
@@ -422,25 +432,20 @@ async def submit_code(
     session.status = "submitted"
     session.submitted_at = now
     session.final_code = data.code
+    session.note_content = data.note_content
+    session.time_spent_secs = time_spent
     session.is_readonly = True
-
-    # Foydalanuvchi umumiy balini yangilash
-    user_res = await db.execute(select(User).where(User.id == current_user.id))
-    user = user_res.scalar_one()
-    user.total_score += score
 
     await db.commit()
 
     return SubmitResponse(
-        result=result.get("status", "error"),
-        score=score,
-        execution_ms=result.get("execution_ms"),
-        output=result.get("output"),
-        message=f"Natija: {score}/10 ball ({passed}/{total} test muvaffaqiyatli)"
+        result="submitted",
+        score=0,
+        message="Yechimingiz muvaffaqiyatli qabul qilindi. Natija AI baholashidan keyin e'lon qilinadi."
     )
 
 
-# ─── Helpers ──────────────────────────────────────────────────
+# --- Helpers --------------------------------------------------
 
 async def _get_active_session(session_id: str, user_id, db: AsyncSession) -> ExamSession:
     result = await db.execute(
@@ -456,25 +461,67 @@ async def _get_active_session(session_id: str, user_id, db: AsyncSession) -> Exa
     return session
 
 
-async def _do_submit(session: ExamSession, question: Question, code: str, db: AsyncSession, user_id, day_id):
-    result = await run_code_in_sandbox(code, question.test_cases)
-    passed = result.get("passed", 0)
-    total = result.get("total", 1)
-    score = round((passed / total) * 10) if total > 0 else 0
+async def _do_auto_submit(session: ExamSession, question: Question, db: AsyncSession, user_id, day_id):
+    """Vaqt tugaganda avtomatik yechim saqlash."""
+    now = datetime.now(timezone.utc)
+    time_spent = None
+    if session.typing_started_at:
+        delta = now - session.typing_started_at
+        time_spent = int(delta.total_seconds())
+
+    file_content = (
+        f"AVTOMATIK SUBMIT (Vaqt tugadi)\n"
+        f"Savol: {question.title}\n"
+        f"Tur: {question.question_type}\n"
+        f"{'=' * 60}\n"
+    )
+    if question.question_type == "practical":
+        file_content += f"KOD:\n{session.final_code or '(kod yozilmagan)'}"
+    else:
+        file_content += f"JAVOB:\n{session.note_content or '(javob yozilmagan)'}"
 
     submission = Submission(
         session_id=session.id,
         user_id=user_id,
         challenge_day_id=day_id,
-        code=code,
-        result=result.get("status", "error"),
-        score=score,
-        execution_ms=result.get("execution_ms"),
-        docker_output=result.get("output"),
+        submission_type=question.question_type,
+        code=session.final_code,
+        note_content=session.note_content,
+        file_content=file_content,
+        result="auto_submitted",
+        score=0,
     )
     db.add(submission)
+    session.time_spent_secs = time_spent
+    session.submitted_at = now
 
-    user_res = await db.execute(select(User).where(User.id == user_id))
-    user = user_res.scalar_one_or_none()
-    if user:
-        user.total_score += score
+
+def _build_submission_file(question, day, user, session, code, note_content, submitted_at, time_spent) -> str:
+    """Yuborilgan yechim uchun fayl mazmunini yaratish."""
+    lines = [
+        f"PYCHALLENGE SUBMISSION",
+        f"{'=' * 60}",
+        f"FOYDALANUVCHI: {user.username} ({user.email})",
+        f"KUN: Day {day.day_number}  -  {day.title or ''}",
+        f"SAVOL: {question.title}",
+        f"SAVOL TURI: {'Amaliy (Practical)' if question.question_type == 'practical' else 'Nazariy (Theoretical)'}",
+        f"QIYINLIK: {question.difficulty}",
+        f"{'=' * 60}",
+        f"SAVOL MATNI:",
+        question.body_text,
+        f"{'=' * 60}",
+        f"SESSIYAGA KIRISH: {session.entered_at}",
+        f"YOZISHNI BOSHLASH: {session.typing_started_at or 'nomalum'}",
+        f"YUBORISH VAQTI: {submitted_at}",
+        f"SARFLANGAN VAQT: {time_spent or 'nomalum'} soniya",
+        f"QOIDABUZARLIKLAR: {session.violations_count}",
+        f"{'=' * 60}",
+    ]
+    if question.question_type == "practical":
+        lines.append("YECHIM (KOD):")
+        lines.append(code or "(kod yo'q)")
+    else:
+        lines.append("YECHIM (JAVOB):")
+        lines.append(note_content or "(javob yo'q)")
+
+    return "\n".join(lines)

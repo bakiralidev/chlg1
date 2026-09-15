@@ -55,10 +55,12 @@ class Question(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     challenge_day_id = Column(UUID(as_uuid=True), ForeignKey("challenge_days.id", ondelete="CASCADE"), nullable=False)
     title = Column(String(300), nullable=False)
-    body_svg = Column(Text, nullable=False)           # Savol matni SVG formatida
-    difficulty = Column(String(10), nullable=False)   # easy | medium | hard
-    starter_code = Column(Text, default="")
-    test_cases = Column(JSONB, nullable=False)         # [{"input": "...", "expected": "..."}]
+    # question_type: "practical" (kod yozish) | "theoretical" (note yozish)
+    question_type = Column(String(20), nullable=False, default="practical")
+    body_text = Column(Text, nullable=False)           # Savol matni (oddiy matn yoki HTML)
+    difficulty = Column(String(10), nullable=False)    # easy | medium | hard
+    starter_code = Column(Text, default="")            # Faqat practical uchun
+    test_cases = Column(JSONB, nullable=True)          # Endi ixtiyoriy
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     challenge_day = relationship("ChallengeDay", back_populates="questions")
@@ -92,7 +94,9 @@ class ExamSession(Base):
     status = Column(String(20), default="active")
     # active | submitted | auto_submitted | disqualified | expired
     violations_count = Column(Integer, default=0)
-    final_code = Column(Text, nullable=True)
+    final_code = Column(Text, nullable=True)       # Amaliy savol uchun kod
+    note_content = Column(Text, nullable=True)     # Nazariy savol uchun izoh matni
+    time_spent_secs = Column(Integer, nullable=True)  # Yechimga sarflangan vaqt (soniyada)
     is_readonly = Column(Boolean, default=False)
 
     assignment = relationship("UserQuestionAssignment", back_populates="sessions")
@@ -115,8 +119,13 @@ class Submission(Base):
     session_id = Column(UUID(as_uuid=True), ForeignKey("exam_sessions.id"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     challenge_day_id = Column(UUID(as_uuid=True), ForeignKey("challenge_days.id"), nullable=False)
-    code = Column(Text, nullable=False)
-    result = Column(String(20))     # pass | fail | error | timeout
+    # Submission turi: "practical" | "theoretical"
+    submission_type = Column(String(20), nullable=False, default="practical")
+    code = Column(Text, nullable=True)             # Amaliy uchun kod
+    note_content = Column(Text, nullable=True)     # Nazariy uchun izoh
+    # Yuborilgan fayl mazmuni (savol + javob birgalikda)
+    file_content = Column(Text, nullable=True)
+    result = Column(String(20), nullable=True)     # pass | fail | error | timeout | manual_review
     score = Column(Integer, default=0)
     execution_ms = Column(Integer, nullable=True)
     docker_output = Column(Text, nullable=True)
@@ -136,3 +145,22 @@ class ChallengeResult(Base):
     finalized_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (UniqueConstraint("challenge_id", "user_id", name="uq_challenge_user_result"),)
+
+
+class ParticipantAIScore(Base):
+    """AI agent tomonidan baholangan natijalar — Excel import orqali kiritiladi."""
+    __tablename__ = "participant_ai_scores"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    challenge_id = Column(UUID(as_uuid=True), ForeignKey("challenges.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    day_id = Column(UUID(as_uuid=True), ForeignKey("challenge_days.id", ondelete="CASCADE"), nullable=True)
+    # Kategoriyalar: approach | correctness | speed | logic | memory
+    category = Column(String(50), nullable=False)
+    score = Column(Integer, nullable=False)  # 0-10
+    notes = Column(Text, nullable=True)      # AI ning izohi
+    imported_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("challenge_id", "user_id", "day_id", "category",
+                         name="uq_ai_score_per_category"),
+    )

@@ -13,3 +13,5 @@ redis
 docker
 apscheduler
 aiosmtplib
+openpyxl
+python-multipart
