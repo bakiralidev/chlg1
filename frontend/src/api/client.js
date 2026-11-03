@@ -23,7 +23,11 @@ client.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       useAuthStore.getState().logout();
-      window.location.href = '/login';
+      const currentPath = window.location.pathname;
+      const isPublicPath = currentPath === '/' || currentPath === '/login' || currentPath === '/register' || currentPath.startsWith('/forgot') || currentPath.startsWith('/reset');
+      if (!isPublicPath) {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }
@@ -55,6 +59,8 @@ export const api = {
   reportViolation: (sessionId, type) =>
     client.post(`/api/v1/sessions/${sessionId}/violation`, { violation_type: type }),
   // payload: { code?, note_content? }
+  runCode: (sessionId, payload) =>
+    client.post(`/api/v1/sessions/${sessionId}/run`, payload),
   submitCode: (sessionId, payload) =>
     client.post(`/api/v1/sessions/${sessionId}/submit`, payload),
 
@@ -87,4 +93,10 @@ export const api = {
     }),
   // AI scores leaderboard
   getAIScores: (challengeId) => client.get(`/api/admin/challenges/${challengeId}/ai-scores`),
+
+  // Ishtirokchilar va yechimlar
+  getParticipants: (params) => client.get('/api/admin/participants', { params }),
+  getSubmissions: (params) => client.get('/api/admin/submissions', { params }),
+  getSubmissionDetail: (id) => client.get(`/api/admin/submissions/${id}`),
+  gradeSubmission: (id, data) => client.post(`/api/admin/submissions/${id}/grade`, data),
 };

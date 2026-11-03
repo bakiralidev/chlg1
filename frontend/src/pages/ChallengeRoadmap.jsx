@@ -93,7 +93,7 @@ export default function ChallengeRoadmap() {
             {days.map((day) => {
               const status = getDayStatus(day);
               const cfg = STATUS_CONFIG[status];
-              const canEnter = status === 'today';
+              const canEnter = status === 'today' || status === 'open' || status === 'completed';
 
               return (
                 <div
@@ -139,7 +139,7 @@ export default function ChallengeRoadmap() {
 
                   {/* Badge */}
                   <div style={{ fontSize: '0.65rem', fontWeight: 700, color: cfg.textColor }}>
-                    {cfg.label}
+                    {status === 'today' ? 'Bugun (Yechish)' : status === 'open' ? 'Yechish mumkin' : cfg.label}
                   </div>
 
                   {/* Score (ertasi kundan) */}

@@ -105,3 +105,10 @@ class AIScoreImportResult(BaseModel):
     imported_scores: int
     skipped: int
     errors: List[str]
+
+
+# --- Manual Grading -------------------------------------------
+class GradeRequest(BaseModel):
+    score: int
+    result: Optional[str] = 'graded'
+    notes: Optional[str] = None

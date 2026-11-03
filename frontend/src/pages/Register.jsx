@@ -36,7 +36,7 @@ export default function Register() {
       };
       login(user, data.access_token);
       toast.success('Ro\'yxatdan o\'tdingiz!');
-      navigate('/');
+      navigate('/dashboard');
     } catch (err) {
       const msg = err.response?.data?.detail || 'Ro\'yxatdan o\'tish xatosi';
       toast.error(msg);

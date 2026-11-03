@@ -15,8 +15,10 @@ from app.schemas.session import (
     EnterDayResponse, TypingStartRequest, AutosaveRequest,
     ViolationRequest, ViolationResponse,
     SubmitRequest, SubmitResponse,
-    ChallengeProgressResponse, MyDayStatus
+    ChallengeProgressResponse, MyDayStatus,
+    RunCodeRequest, RunCodeResponse
 )
+from app.services.sandbox_service import execute_python_code
 from app.core.security import get_current_user
 
 router = APIRouter(prefix="/api/v1", tags=["Session"])
@@ -103,10 +105,13 @@ async def my_progress(
         is_completed = submission is not None
         is_disqualified = session is not None and session.status == "disqualified"
 
-        show_score = day_date < today
-        score = submission.score if (submission and show_score) else None
+        # Bajarilgan bo'lsa ballni ko'rsatish
+        score = submission.score if submission else None
         if score:
             total_my_score += score
+
+        # O'tgan kunlar ham ochiq bo'ladi (faqat topshirilgan yoki diskvalifikatsiya bo'lmasa)
+        is_expired = False
 
         day_statuses.append(MyDayStatus(
             day_id=str(day.id),
@@ -115,7 +120,7 @@ async def my_progress(
             time_limit_secs=day.time_limit_secs,
             is_today=is_today,
             is_locked=is_locked,
-            is_expired=is_expired_no_attempt and not is_completed and not is_disqualified,
+            is_expired=is_expired,
             is_completed=is_completed,
             is_disqualified=is_disqualified,
             score=score,
@@ -161,8 +166,7 @@ async def enter_day(
 
     if day_date > today:
         raise HTTPException(status_code=403, detail=f"Bu kun hali ochilmagan. {day_date.isoformat()} kuni ochiladi")
-    if day_date < today:
-        raise HTTPException(status_code=403, detail="Bu kunning muddati otgan")
+    # O'tgan kunlarni ham ishlab ko'rishga ruxsat etiladi
 
     # Tayinlov bor/yoqligini tekshirish
     assign_result = await db.execute(
@@ -240,29 +244,59 @@ async def enter_day(
                 previous_code=session.final_code,
                 previous_note=session.note_content,
                 previous_score=submission.score if submission else 0,
+                violations_count=session.violations_count,
+                max_violations=challenge.max_violations,
             )
 
         # Vaqt tugaganini tekshirish
         if session.expires_at < now:
-            if session.final_code or session.note_content:
-                await _do_auto_submit(session, question, db, current_user.id, day.id)
-            session.status = "expired" if not (session.final_code or session.note_content) else "auto_submitted"
-            await db.commit()
-            return EnterDayResponse(
-                session_id=str(session.id),
-                expires_at=session.expires_at,
-                entered_at=session.entered_at,
-                question_id=str(question.id),
-                question_title=question.title,
-                question_type=question.question_type,
-                question_body=question.body_text,
-                starter_code=question.starter_code or "",
-                time_limit_secs=day.time_limit_secs,
-                is_readonly=True,
-                previous_code=session.final_code,
-                previous_note=session.note_content,
-                previous_score=0,
+            sub_check = await db.execute(
+                select(Submission).where(Submission.session_id == session.id)
             )
+            sub_exists = sub_check.scalar_one_or_none()
+            if not sub_exists:
+                # Oldin yuborilmagan bo'lsa, o'tgan kunni ishlash uchun yangi vaqt berish
+                session.expires_at = now + timedelta(seconds=day.time_limit_secs)
+                session.status = "active"
+                session.violations_count = 0
+                await db.commit()
+                await db.refresh(session)
+                return EnterDayResponse(
+                    session_id=str(session.id),
+                    expires_at=session.expires_at,
+                    entered_at=session.entered_at,
+                    question_id=str(question.id),
+                    question_title=question.title,
+                    question_type=question.question_type,
+                    question_body=question.body_text,
+                    starter_code=question.starter_code or "",
+                    time_limit_secs=day.time_limit_secs,
+                    is_readonly=False,
+                    previous_code=session.final_code,
+                    previous_note=session.note_content,
+                    violations_count=0,
+                    max_violations=challenge.max_violations,
+                )
+            else:
+                session.status = "submitted"
+                await db.commit()
+                return EnterDayResponse(
+                    session_id=str(session.id),
+                    expires_at=session.expires_at,
+                    entered_at=session.entered_at,
+                    question_id=str(question.id),
+                    question_title=question.title,
+                    question_type=question.question_type,
+                    question_body=question.body_text,
+                    starter_code=question.starter_code or "",
+                    time_limit_secs=day.time_limit_secs,
+                    is_readonly=True,
+                    previous_code=session.final_code,
+                    previous_note=session.note_content,
+                    previous_score=sub_exists.score if sub_exists else 0,
+                    violations_count=session.violations_count,
+                    max_violations=challenge.max_violations,
+                )
     else:
         # Yangi sessiya yaratish
         expires_at = now + timedelta(seconds=day.time_limit_secs)
@@ -287,6 +321,10 @@ async def enter_day(
         starter_code=question.starter_code or "",
         time_limit_secs=day.time_limit_secs,
         is_readonly=False,
+        previous_code=session.final_code,
+        previous_note=session.note_content,
+        violations_count=session.violations_count,
+        max_violations=challenge.max_violations,
     )
 
 
@@ -365,6 +403,40 @@ async def report_violation(
             if is_disqualified
             else f"Ogohlantirish {session.violations_count}/{challenge.max_violations}"
         )
+    )
+
+
+# --- Kodni Terminalda ishga tushirish ------------------------
+
+@router.post("/sessions/{session_id}/run", response_model=RunCodeResponse)
+async def run_session_code(
+    session_id: str,
+    data: RunCodeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Sessiyani tekshirish (foydalanuvchiga tegishlimi)
+    result = await db.execute(
+        select(ExamSession).where(
+            ExamSession.id == session_id,
+            ExamSession.user_id == current_user.id
+        )
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Sessiya topilmadi")
+
+    exec_result = await execute_python_code(
+        code=data.code,
+        input_data=data.input_data or "",
+        timeout_seconds=5.0
+    )
+
+    return RunCodeResponse(
+        stdout=exec_result["stdout"],
+        stderr=exec_result["stderr"],
+        exit_code=exec_result["exit_code"],
+        execution_ms=exec_result["execution_ms"]
     )
 
 

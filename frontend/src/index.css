@@ -471,3 +471,41 @@ tr:hover td { background: rgba(137,180,250,0.04); }
 
 .timer-display.warning { color: var(--warning); }
 .timer-display.danger  { color: var(--danger); animation: pulse 1s infinite; }
+
+
+/* ─── Hero Ambient Animations ─────────────────────────────────── */
+@keyframes floatSlow {
+  0%, 100% { transform: translateY(0px) rotate(var(--rot, 0deg)); }
+  50% { transform: translateY(-10px) rotate(var(--rot, 0deg)); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.08); }
+}
+
+.hero-code-badge {
+  position: absolute;
+  z-index: 1;
+  background: rgba(24, 24, 37, 0.78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(137, 180, 250, 0.2);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1.15rem;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: left;
+  line-height: 1.5;
+  user-select: none;
+  animation: floatSlow 6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@media (max-width: 1024px) {
+  .hero-code-badge {
+    display: none !important;
+  }
+}

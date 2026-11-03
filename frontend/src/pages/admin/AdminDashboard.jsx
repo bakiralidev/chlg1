@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../../api/client';
 import { toast } from 'react-hot-toast';
 import Navbar from '../../components/Navbar';
+import AdminNav from '../../components/AdminNav';
 
 export default function AdminDashboard() {
   const [challenges, setChallenges] = useState([]);
@@ -81,15 +82,14 @@ export default function AdminDashboard() {
       <Navbar />
       <div className="page">
         <div className="container" style={{ paddingTop: '2rem', paddingBottom: '4rem' }}>
+          <AdminNav />
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
             <div>
               <h1 style={{ fontSize: '1.8rem', marginBottom: '0.25rem' }}>👑 Admin Panel</h1>
-              <p style={{ color: 'var(--text-muted)' }}>Challengelarni boshqarish</p>
+              <p style={{ color: 'var(--text-muted)' }}>Challengelar, ishtirokchilar va natijalarni boshqarish</p>
             </div>
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-              <Link to="/admin/scores" className="btn btn-secondary">
-                🤖 AI Baholash
-              </Link>
               <Link to="/admin/challenge/new" id="create-challenge-btn" className="btn btn-primary">
                 + Yangi Challenge
               </Link>
@@ -116,7 +116,7 @@ export default function AdminDashboard() {
                         <h3 style={{ fontSize: '1.15rem' }}>{ch.name}</h3>
                         {STATUS_BADGE[ch.status] || <span className="badge badge-gray">{ch.status}</span>}
                       </div>
-                      <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.85rem', color: 'var(--text-dim)' }}>
+                      <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.85rem', color: 'var(--text-dim)', flexWrap: 'wrap' }}>
                         <span>📅 {ch.total_days} kun</span>
                         <span>🗓 {new Date(ch.start_date).toLocaleDateString('uz-UZ')}</span>
                         {ch.prize_info && <span>🏆 {ch.prize_info}</span>}
@@ -125,13 +125,20 @@ export default function AdminDashboard() {
 
                     <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                       <Link
-                        to={`/admin/challenge/${ch.id}/edit`}
-                        id={`edit-challenge-${ch.id}`}
-                        className="btn btn-ghost"
+                        to={`/admin/submissions?challenge_id=${ch.id}`}
+                        className="btn btn-secondary"
                         style={{ fontSize: '0.85rem', padding: '0.4rem 0.75rem' }}
                       >
-                        ✏️ Tahrirlash
+                        📝 Yechimlar & Baholash
                       </Link>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: '0.85rem', padding: '0.4rem 0.75rem' }}
+                        onClick={() => handleDownloadZip(ch.id, ch.name)}
+                        title="Barcha topshirilgan yechimlarni ZIP arxiv holatida yuklab olish"
+                      >
+                        📦 ZIP
+                      </button>
                       <Link
                         to={`/admin/challenge/${ch.id}/days`}
                         id={`manage-days-${ch.id}`}
@@ -147,6 +154,14 @@ export default function AdminDashboard() {
                         style={{ fontSize: '0.85rem', padding: '0.4rem 0.75rem' }}
                       >
                         ❓ Savollar
+                      </Link>
+                      <Link
+                        to={`/admin/challenge/${ch.id}/edit`}
+                        id={`edit-challenge-${ch.id}`}
+                        className="btn btn-ghost"
+                        style={{ fontSize: '0.85rem', padding: '0.4rem 0.75rem' }}
+                      >
+                        ✏️ Tahrirlash
                       </Link>
                       {ch.status === 'draft' && (
                         <button
@@ -187,4 +202,3 @@ export default function AdminDashboard() {
     </>
   );
 }
-

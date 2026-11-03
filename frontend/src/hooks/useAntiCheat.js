@@ -93,17 +93,26 @@ export function useAntiCheat({ sessionId, onViolation, enabled = true }) {
     // 6. Right-click bloklash
     const handleContextMenu = (e) => e.preventDefault();
 
+    // 7. Sahifadan chiqish / tabni yopishdan ogohlantirish
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = 'Imtihon davom etmoqda! Sahifadan chiqsangiz qoidabuzarlik hisoblanadi.';
+      return e.returnValue;
+    };
+
     // Eventlarni ulash
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('contextmenu', handleContextMenu);
+    window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('contextmenu', handleContextMenu);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       clearInterval(multiMonitorInterval);
     };
   }, [sessionId, enabled, reportViolation]);

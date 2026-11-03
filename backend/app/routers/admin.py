@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,13 +10,13 @@ import openpyxl
 from app.db.database import get_db
 from app.models.models import (
     Challenge, ChallengeDay, Question, ExamSession,
-    Submission, User, UserQuestionAssignment, ParticipantAIScore
+    Submission, User, UserQuestionAssignment, ParticipantAIScore, ViolationLog
 )
 from app.schemas.admin import (
     ChallengeCreate, ChallengeResponse,
     DayCreate, DayResponse,
     QuestionCreate, QuestionResponse,
-    ChallengeStats, AIScoreImportResult
+    ChallengeStats, AIScoreImportResult, GradeRequest
 )
 from app.core.security import get_current_admin
 
@@ -618,4 +619,339 @@ def _question_to_dict(q: Question) -> dict:
         "id": str(q.id), "challenge_day_id": str(q.challenge_day_id),
         "title": q.title, "question_type": q.question_type,
         "difficulty": q.difficulty, "created_at": q.created_at,
+    }
+
+
+# --- PARTICIPANTS MANAGEMENT ---------------------------------
+
+@router.get("/participants")
+async def list_participants(
+    search: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin)
+):
+    """Barcha qatnashuvchilar (oddiy foydalanuvchilar) ro'yxati va ularning statistikasi."""
+    query = select(User).where(User.is_admin == False).order_by(User.created_at.desc())
+    if search:
+        search_filter = f"%{search}%".lower()
+        query = query.where(
+            (func.lower(User.username).ilike(search_filter)) |
+            (func.lower(User.email).ilike(search_filter))
+        )
+    result = await db.execute(query)
+    users = result.scalars().all()
+
+    participants = []
+    for u in users:
+        subs_res = await db.execute(
+            select(func.count(Submission.id), func.sum(Submission.score))
+            .where(Submission.user_id == u.id)
+        )
+        subs_count, total_score = subs_res.first()
+
+        dq_res = await db.execute(
+            select(func.count(ExamSession.id))
+            .where(ExamSession.user_id == u.id, ExamSession.status == "disqualified")
+        )
+        dq_count = dq_res.scalar() or 0
+
+        last_sub_res = await db.execute(
+            select(Submission.submitted_at)
+            .where(Submission.user_id == u.id)
+            .order_by(Submission.submitted_at.desc())
+            .limit(1)
+        )
+        last_active = last_sub_res.scalar_one_or_none()
+
+        participants.append({
+            "id": str(u.id),
+            "username": u.username,
+            "email": u.email,
+            "created_at": u.created_at,
+            "total_score": int(total_score) if total_score is not None else (u.total_score or 0),
+            "submissions_count": subs_count or 0,
+            "disqualified_count": dq_count,
+            "last_active": last_active or u.created_at,
+        })
+
+    return participants
+
+
+# --- SUBMISSIONS & GRADING ------------------------------------
+
+@router.get("/submissions")
+async def list_submissions(
+    challenge_id: Optional[str] = None,
+    day_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin)
+):
+    """Ishtirokchilar tomonidan yuborilgan yechimlar va sessiyalar ro'yxati."""
+    query = (
+        select(
+            ExamSession,
+            Submission,
+            User.username,
+            User.email,
+            ChallengeDay.id.label("c_day_id"),
+            ChallengeDay.day_number,
+            ChallengeDay.title.label("day_title"),
+            Challenge.id.label("challenge_id"),
+            Challenge.name.label("challenge_name"),
+            Question.title.label("question_title"),
+            Question.question_type,
+            Question.difficulty,
+        )
+        .join(User, ExamSession.user_id == User.id)
+        .join(UserQuestionAssignment, ExamSession.assignment_id == UserQuestionAssignment.id)
+        .join(ChallengeDay, UserQuestionAssignment.challenge_day_id == ChallengeDay.id)
+        .join(Challenge, ChallengeDay.challenge_id == Challenge.id)
+        .join(Question, UserQuestionAssignment.question_id == Question.id)
+        .outerjoin(Submission, Submission.session_id == ExamSession.id)
+    )
+
+    if challenge_id:
+        query = query.where(Challenge.id == challenge_id)
+    if day_id:
+        query = query.where(ChallengeDay.id == day_id)
+    if user_id:
+        query = query.where(User.id == user_id)
+    if status:
+        if status == "disqualified":
+            query = query.where(ExamSession.status == "disqualified")
+        elif status == "graded":
+            query = query.where(Submission.score > 0)
+        elif status == "ungraded":
+            query = query.where((Submission.score == None) | (Submission.score == 0), ExamSession.status != "disqualified")
+        elif status in ("submitted", "auto_submitted", "active"):
+            query = query.where(ExamSession.status == status)
+
+    if search:
+        search_filter = f"%{search}%".lower()
+        query = query.where(
+            (func.lower(User.username).ilike(search_filter)) |
+            (func.lower(User.email).ilike(search_filter)) |
+            (func.lower(Question.title).ilike(search_filter))
+        )
+
+    query = query.order_by(ExamSession.submitted_at.desc().nullslast(), ExamSession.entered_at.desc())
+    result = await db.execute(query)
+    rows = result.all()
+
+    items = []
+    for r in rows:
+        sess = r.ExamSession
+        sub = r.Submission
+        items.append({
+            "id": str(sub.id) if sub else str(sess.id),
+            "session_id": str(sess.id),
+            "user": {
+                "id": str(sess.user_id),
+                "username": r.username,
+                "email": r.email,
+            },
+            "challenge": {
+                "id": str(r.challenge_id),
+                "name": r.challenge_name,
+            },
+            "day": {
+                "id": str(r.c_day_id),
+                "day_number": r.day_number,
+                "title": r.day_title,
+            },
+            "question": {
+                "title": r.question_title,
+                "question_type": r.question_type,
+                "difficulty": r.difficulty,
+            },
+            "submission_type": sub.submission_type if sub else ("practical" if sess.final_code else "theoretical"),
+            "code": sub.code if sub else sess.final_code,
+            "note_content": sub.note_content if sub else sess.note_content,
+            "score": sub.score if sub else 0,
+            "result": sub.result if sub else ("disqualified" if sess.status == "disqualified" else "pending"),
+            "submitted_at": sub.submitted_at if sub else sess.submitted_at,
+            "entered_at": sess.entered_at,
+            "time_spent_secs": sess.time_spent_secs or 0,
+            "violations_count": sess.violations_count or 0,
+            "session_status": sess.status,
+        })
+    return items
+
+
+@router.get("/submissions/{item_id}")
+async def get_submission_detail(
+    item_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin)
+):
+    """Yagona yechimning to'liq detallari: savol sharti, yozilgan javob, qoidabuzarliklar va baholar."""
+    sub_res = await db.execute(select(Submission).where(Submission.id == item_id))
+    sub = sub_res.scalar_one_or_none()
+    sess_id = sub.session_id if sub else item_id
+
+    result = await db.execute(
+        select(
+            ExamSession,
+            Submission,
+            User.username,
+            User.email,
+            ChallengeDay.id.label("c_day_id"),
+            ChallengeDay.day_number,
+            ChallengeDay.title.label("day_title"),
+            Challenge.id.label("challenge_id"),
+            Challenge.name.label("challenge_name"),
+            Question.id.label("question_id"),
+            Question.title.label("question_title"),
+            Question.question_type,
+            Question.difficulty,
+            Question.body_text,
+            Question.starter_code,
+        )
+        .join(User, ExamSession.user_id == User.id)
+        .join(UserQuestionAssignment, ExamSession.assignment_id == UserQuestionAssignment.id)
+        .join(ChallengeDay, UserQuestionAssignment.challenge_day_id == ChallengeDay.id)
+        .join(Challenge, ChallengeDay.challenge_id == Challenge.id)
+        .join(Question, UserQuestionAssignment.question_id == Question.id)
+        .outerjoin(Submission, Submission.session_id == ExamSession.id)
+        .where((ExamSession.id == sess_id) | (Submission.id == item_id))
+    )
+    r = result.first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Yechim yoki sessiya topilmadi")
+
+    sess = r.ExamSession
+    sub = r.Submission
+
+    v_rows = await db.execute(
+        select(ViolationLog).where(ViolationLog.session_id == sess.id).order_by(ViolationLog.created_at)
+    )
+    violations = [
+        {"id": v.id, "violation_type": v.violation_type, "created_at": v.created_at}
+        for v in v_rows.scalars().all()
+    ]
+
+    ai_rows = await db.execute(
+        select(ParticipantAIScore).where(
+            ParticipantAIScore.user_id == sess.user_id,
+            ParticipantAIScore.challenge_id == r.challenge_id
+        )
+    )
+    ai_scores = [
+        {"category": s.category, "score": s.score, "notes": s.notes}
+        for s in ai_rows.scalars().all()
+    ]
+
+    return {
+        "id": str(sub.id) if sub else str(sess.id),
+        "session_id": str(sess.id),
+        "user": {
+            "id": str(sess.user_id),
+            "username": r.username,
+            "email": r.email,
+        },
+        "challenge": {
+            "id": str(r.challenge_id),
+            "name": r.challenge_name,
+        },
+        "day": {
+            "id": str(r.c_day_id),
+            "day_number": r.day_number,
+            "title": r.day_title,
+        },
+        "question": {
+            "id": str(r.question_id),
+            "title": r.question_title,
+            "question_type": r.question_type,
+            "difficulty": r.difficulty,
+            "body_text": r.body_text,
+            "starter_code": r.starter_code,
+        },
+        "submission_type": sub.submission_type if sub else ("practical" if sess.final_code else "theoretical"),
+        "code": sub.code if sub else sess.final_code,
+        "note_content": sub.note_content if sub else sess.note_content,
+        "file_content": sub.file_content if sub else None,
+        "score": sub.score if sub else 0,
+        "result": sub.result if sub else ("disqualified" if sess.status == "disqualified" else "pending"),
+        "submitted_at": sub.submitted_at if sub else sess.submitted_at,
+        "entered_at": sess.entered_at,
+        "typing_started_at": sess.typing_started_at,
+        "time_spent_secs": sess.time_spent_secs or 0,
+        "violations_count": sess.violations_count or 0,
+        "session_status": sess.status,
+        "violations": violations,
+        "ai_scores": ai_scores,
+    }
+
+
+@router.post("/submissions/{item_id}/grade")
+async def grade_submission(
+    item_id: str,
+    data: GradeRequest,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin)
+):
+    """Ishtirokchi topshirig'ini to'g'ridan-to'g'ri baholash (0-100 ball va izoh)."""
+    if data.score < 0 or data.score > 100:
+        raise HTTPException(status_code=400, detail="Ball 0 dan 100 gacha bo'lishi kerak")
+
+    sub_res = await db.execute(select(Submission).where(Submission.id == item_id))
+    sub = sub_res.scalar_one_or_none()
+
+    if not sub:
+        sub_res = await db.execute(select(Submission).where(Submission.session_id == item_id))
+        sub = sub_res.scalar_one_or_none()
+
+    if not sub:
+        sess_res = await db.execute(select(ExamSession).where(ExamSession.id == item_id))
+        sess = sess_res.scalar_one_or_none()
+        if not sess:
+            raise HTTPException(status_code=404, detail="Yechim yoki sessiya topilmadi")
+
+        assign_res = await db.execute(
+            select(UserQuestionAssignment).where(UserQuestionAssignment.id == sess.assignment_id)
+        )
+        assignment = assign_res.scalar_one()
+
+        sub = Submission(
+            session_id=sess.id,
+            user_id=sess.user_id,
+            challenge_day_id=assignment.challenge_day_id,
+            submission_type="practical" if sess.final_code else "theoretical",
+            code=sess.final_code or "",
+            note_content=sess.note_content or "",
+            score=data.score,
+            result=data.result or ("pass" if data.score >= 60 else "fail"),
+            docker_output=f"[Admin bahosi]: {data.notes}" if data.notes else None,
+        )
+        db.add(sub)
+        await db.flush()
+    else:
+        sub.score = data.score
+        sub.result = data.result or ("pass" if data.score >= 60 else "fail")
+        if data.notes:
+            sub.docker_output = (sub.docker_output or "") + f"\n[Admin bahosi]: {data.notes}"
+
+    total_res = await db.execute(
+        select(func.sum(Submission.score)).where(Submission.user_id == sub.user_id)
+    )
+    user_total = total_res.scalar() or 0
+
+    user_res = await db.execute(select(User).where(User.id == sub.user_id))
+    user = user_res.scalar_one_or_none()
+    if user:
+        user.total_score = int(user_total)
+
+    await db.commit()
+    await db.refresh(sub)
+
+    return {
+        "success": True,
+        "id": str(sub.id),
+        "score": sub.score,
+        "result": sub.result,
+        "user_total_score": int(user_total),
+        "message": "Yechim muvaffaqiyatli baholandi!",
     }

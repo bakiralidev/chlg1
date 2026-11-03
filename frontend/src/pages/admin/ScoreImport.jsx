@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { toast } from "react-hot-toast";
+import Navbar from "../../components/Navbar";
+import AdminNav from "../../components/AdminNav";
 
 const CAT_LABELS = { approach: "Yondashuv", correctness: "To'g'rilik", speed: "Tezlik", logic: "Mantiq", memory: "Xotira" };
 
@@ -54,15 +56,15 @@ export default function ScoreImport() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg-primary)", padding: "2rem 1rem" }}>
-      <div style={{ maxWidth: 1000, margin: "0 auto" }}>
-        <div style={{ marginBottom: "2rem" }}>
-          <button onClick={() => navigate("/admin")} style={{ background: "transparent", border: "1px solid var(--border-color)", color: "var(--text-secondary)", padding: "0.5rem 1rem", borderRadius: 8, cursor: "pointer", marginBottom: "1rem" }}>
-            Admin panel
-          </button>
-          <h1 style={{ color: "var(--text-primary)", fontSize: "1.8rem", fontWeight: 700, margin: 0 }}>
-            AI Baholash Import
-          </h1>
+    <>
+      <Navbar />
+      <div className="page">
+        <div className="container" style={{ paddingTop: "2rem", paddingBottom: "4rem" }}>
+          <AdminNav />
+          <div style={{ marginBottom: "2rem" }}>
+            <h1 style={{ color: "var(--text-primary)", fontSize: "1.8rem", fontWeight: 700, margin: 0 }}>
+              🤖 AI Baholash Import
+            </h1>
           <p style={{ color: "var(--text-muted)", marginTop: "0.5rem" }}>
             AI agent tomonidan baholangan natijalarni Excel orqali yuklang. Tizim foydalanuvchilarni email bo'yicha avtomatik moslashtiradi.
           </p>
@@ -177,5 +179,6 @@ export default function ScoreImport() {
         </div>
       </div>
     </div>
-  );
+  </>
+);
 }

@@ -28,7 +28,7 @@ export default function Login() {
       };
       login(user, data.access_token);
       toast.success("Xush kelibsiz!");
-      navigate('/');
+      navigate('/dashboard');
     } catch (err) {
       const msg = err.response?.data?.detail || 'Kirish xatosi';
       toast.error(msg);

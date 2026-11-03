@@ -17,6 +17,8 @@ class EnterDayResponse(BaseModel):
     previous_code: Optional[str] = None
     previous_note: Optional[str] = None
     previous_score: Optional[int] = None
+    violations_count: int = 0
+    max_violations: int = 3
 
 
 class TypingStartRequest(BaseModel):
@@ -73,3 +75,15 @@ class ChallengeProgressResponse(BaseModel):
     total_days: int
     days: list[MyDayStatus]
     my_total_score: Optional[int]
+
+
+class RunCodeRequest(BaseModel):
+    code: str
+    input_data: Optional[str] = ""
+
+
+class RunCodeResponse(BaseModel):
+    stdout: str
+    stderr: str
+    exit_code: int
+    execution_ms: int

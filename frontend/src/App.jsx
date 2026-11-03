@@ -2,6 +2,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
 import { Toaster } from 'react-hot-toast';
 
+// Public Landing page
+import Landing from './pages/Landing';
+
 // Auth pages
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -20,6 +23,8 @@ import ChallengeForm from './pages/admin/ChallengeForm';
 import DayManager from './pages/admin/DayManager';
 import QuestionForm from './pages/admin/QuestionForm';
 import ScoreImport from './pages/admin/ScoreImport';
+import ParticipantsList from './pages/admin/ParticipantsList';
+import SubmissionsReview from './pages/admin/SubmissionsReview';
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -40,6 +45,7 @@ export default function App() {
       />
       <Routes>
         {/* Public routes */}
+        <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
@@ -47,7 +53,7 @@ export default function App() {
 
         {/* Protected user routes */}
         <Route element={<ProtectedRoute />}>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/challenge/:challengeId" element={<ChallengeRoadmap />} />
           <Route path="/challenge/:challengeId/results" element={<Results />} />
           <Route path="/arena/:dayId" element={<Arena />} />
@@ -60,6 +66,8 @@ export default function App() {
           <Route path="/admin/challenge/:id/edit" element={<ChallengeForm />} />
           <Route path="/admin/challenge/:id/days" element={<DayManager />} />
           <Route path="/admin/challenge/:challengeId/questions" element={<QuestionForm />} />
+          <Route path="/admin/participants" element={<ParticipantsList />} />
+          <Route path="/admin/submissions" element={<SubmissionsReview />} />
           <Route path="/admin/scores" element={<ScoreImport />} />
         </Route>
 
