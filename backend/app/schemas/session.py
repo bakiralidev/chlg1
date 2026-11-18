@@ -1,6 +1,6 @@
-from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
+from pydantic import BaseModel
 
 
 class EnterDayResponse(BaseModel):
@@ -9,9 +9,11 @@ class EnterDayResponse(BaseModel):
     entered_at: datetime
     question_id: str
     question_title: str
-    question_type: str          # "practical" | "theoretical"
+    question_type: str          # "practical" | "quiz" | "theoretical"
     question_body: str          # Savol matni
     starter_code: str
+    sample_tests: Optional[list[dict[str, Any]]] = None
+    options: Optional[list[str]] = None
     time_limit_secs: int
     is_readonly: bool
     previous_code: Optional[str] = None
@@ -44,14 +46,16 @@ class ViolationResponse(BaseModel):
 class SubmitRequest(BaseModel):
     code: Optional[str] = None           # Amaliy savol uchun
     note_content: Optional[str] = None   # Nazariy savol uchun
+    selected_option: Optional[int] = None  # Quiz savol uchun (ko'rsatilgan indeks)
     keystroke_count: Optional[int] = None
 
 
 class SubmitResponse(BaseModel):
-    result: str           # submitted | disqualified | manual_review
+    result: str           # pass | fail | error | timeout | manual_review | submitted
     score: int
     execution_ms: Optional[int] = None
-    output: Optional[str] = None
+    passed_tests: Optional[int] = None
+    total_tests: Optional[int] = None
     message: str
 
 
@@ -75,6 +79,8 @@ class ChallengeProgressResponse(BaseModel):
     total_days: int
     days: list[MyDayStatus]
     my_total_score: Optional[int]
+    my_rank: Optional[int] = None
+    total_participants: Optional[int] = None
 
 
 class RunCodeRequest(BaseModel):
@@ -87,3 +93,5 @@ class RunCodeResponse(BaseModel):
     stderr: str
     exit_code: int
     execution_ms: int
+    timed_out: bool = False
+    truncated: bool = False
