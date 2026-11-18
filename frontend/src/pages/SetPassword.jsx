@@ -1,15 +1,22 @@
 import { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { api } from '../api/client';
+import { useAuthStore } from '../store/authStore';
 
-export default function ResetPassword() {
+export default function SetPassword() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get('token') || '';
-
+  const { isAuthenticated, user, updateUser } = useAuthStore();
   const [form, setForm] = useState({ password: '', confirm: '' });
   const [loading, setLoading] = useState(false);
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (user && !user.must_change_password) {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
@@ -19,74 +26,69 @@ export default function ResetPassword() {
       toast.error('Parollar mos kelmadi');
       return;
     }
-    if (form.password.length < 6) {
-      toast.error('Parol kamida 6 belgidan iborat bo\'lishi kerak');
+    if (form.password.length < 8 || !/[A-Za-z]/.test(form.password) || !/\d/.test(form.password)) {
+      toast.error("Parol kamida 8 belgi, harf va raqamdan iborat bo'lishi kerak");
       return;
     }
+
     setLoading(true);
     try {
-      await api.resetPassword({ token, new_password: form.password });
-      toast.success('Parol muvaffaqiyatli yangilandi!');
-      navigate('/login');
+      await api.setPassword(form.password);
+      updateUser({ must_change_password: false });
+      toast.success("Yangi parol o'rnatildi!");
+      navigate('/dashboard');
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Havola yaroqsiz yoki muddati o\'tgan');
+      const detail = err.response?.data?.detail;
+      const msg = Array.isArray(detail) ? detail[0]?.msg : (detail || 'Xato yuz berdi');
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  if (!token) {
-    return (
-      <div className="page-centered">
-        <div className="auth-card" style={{ textAlign: 'center' }}>
-          <p style={{ color: 'var(--danger)' }}>⚠️ Yaroqsiz havola</p>
-          <Link to="/login" className="btn btn-secondary" style={{ marginTop: '1rem', display: 'inline-flex' }}>
-            Loginга qaytish
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="page-centered">
+    <div className="page-centered" style={{ background: 'radial-gradient(ellipse at top, #1a1a2e 0%, var(--bg-base) 70%)' }}>
       <div className="auth-wrapper fade-in">
         <div className="auth-card">
           <div className="auth-logo">
-            <h1>🔐 Yangi parol</h1>
-            <p>Yangi parolingizni kiriting</p>
+            <h1>🔐 Yangi parol o'rnatish</h1>
+            <p>Davom etish uchun doimiy parolingizni o'rnating</p>
           </div>
 
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label className="form-label" htmlFor="reset-password">Yangi parol</label>
+              <label className="form-label" htmlFor="set-password">Yangi parol (kamida 8 belgi, harf va raqam)</label>
               <input
-                id="reset-password"
+                id="set-password"
                 type="password"
                 name="password"
                 className="form-input"
                 placeholder="••••••••"
                 value={form.password}
                 onChange={handleChange}
+                autoComplete="new-password"
                 required
               />
             </div>
+
             <div className="form-group">
-              <label className="form-label" htmlFor="reset-confirm">Parolni tasdiqlang</label>
+              <label className="form-label" htmlFor="set-confirm">Parolni tasdiqlang</label>
               <input
-                id="reset-confirm"
+                id="set-confirm"
                 type="password"
                 name="confirm"
                 className="form-input"
                 placeholder="••••••••"
                 value={form.confirm}
                 onChange={handleChange}
+                autoComplete="new-password"
                 required
               />
             </div>
-            <button id="reset-submit" type="submit" className="btn btn-primary btn-full" disabled={loading}>
+
+            <button id="set-password-submit" type="submit" className="btn btn-primary btn-full" disabled={loading}>
               {loading ? <span className="spinner" /> : null}
-              {loading ? 'Saqlanmoqda...' : 'Parolni yangilash'}
+              {loading ? 'Saqlanmoqda...' : 'Parolni saqlash'}
             </button>
           </form>
         </div>

@@ -1,0 +1,9 @@
+aiogram>=3.13,<4.0
+sqlalchemy[asyncio]>=2.0
+asyncpg
+passlib
+bcrypt<4.0.0
+openpyxl
+pydantic-settings
+python-dotenv
+apscheduler

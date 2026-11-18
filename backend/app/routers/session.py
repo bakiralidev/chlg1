@@ -19,9 +19,16 @@ from app.schemas.session import (
     RunCodeRequest, RunCodeResponse
 )
 from app.services.sandbox_service import execute_python_code
+from app.core.config import settings
 from app.core.security import get_current_user
 
 router = APIRouter(prefix="/api/v1", tags=["Session"])
+
+
+def _local_date(dt: datetime):
+    if dt.tzinfo is None:
+        return dt.date()
+    return dt.astimezone(settings.tz).date()
 
 
 # --- Challengelar royxati ------------------------------------
@@ -32,7 +39,7 @@ async def list_active_challenges(db: AsyncSession = Depends(get_db)):
         select(Challenge).where(Challenge.status == "active").order_by(Challenge.start_date)
     )
     challenges = result.scalars().all()
-    now = datetime.now(timezone.utc)
+    now = settings.now_local()
     return [
         {
             "id": str(c.id),
@@ -42,7 +49,7 @@ async def list_active_challenges(db: AsyncSession = Depends(get_db)):
             "start_date": c.start_date,
             "end_date": c.start_date + timedelta(days=c.total_days),
             "prize_info": c.prize_info,
-            "is_started": c.start_date <= now,
+            "is_started": (c.start_date.astimezone(settings.tz) if c.start_date.tzinfo else c.start_date.replace(tzinfo=settings.tz)) <= now,
         }
         for c in challenges
     ]
@@ -68,13 +75,12 @@ async def my_progress(
     )
     days = days_result.scalars().all()
 
-    now = datetime.now(timezone.utc)
-    today = now.date()
+    today = settings.today_local()
     day_statuses = []
     total_my_score = 0
 
     for day in days:
-        day_date = (challenge.start_date + timedelta(days=day.day_number - 1)).date()
+        day_date = _local_date(challenge.start_date) + timedelta(days=day.day_number - 1)
         opens_on = day_date.isoformat()
         is_today = day_date == today
         is_locked = day_date > today
@@ -160,12 +166,31 @@ async def enter_day(
     if challenge.status != "active":
         raise HTTPException(status_code=400, detail="Bu challenge hozir faol emas")
 
+    if not current_user.is_admin and current_user.status != "confirmed":
+        status_messages = {
+            "registered": "Qatnashishni tasdiqlamadingiz. Telegram botda 'Tayyorman' tugmasini bosing.",
+            "waitlist": "Siz kutish ro'yxatidasiz. Joy bo'shaganda Telegram bot orqali xabar beriladi.",
+            "expired": "Tasdiqlash muddati tugagan. Challenge'ga kirish mumkin emas.",
+            "disqualified": "Siz diskvalifikatsiya qilingansiz.",
+            "banned": "Akkauntingiz bloklangan.",
+        }
+        raise HTTPException(
+            status_code=403,
+            detail=status_messages.get(current_user.status, "Challenge'ga kirishga ruxsat yo'q")
+        )
+
     now = datetime.now(timezone.utc)
-    day_date = (challenge.start_date + timedelta(days=day.day_number - 1)).date()
-    today = now.date()
+    today = settings.today_local()
+    if not current_user.is_admin and today < settings.challenge_start:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Challenge hali boshlanmagan. {settings.CHALLENGE_START_DATE} kuni boshlanadi"
+        )
+
+    day_date = _local_date(challenge.start_date) + timedelta(days=day.day_number - 1)
 
     if day_date > today:
-        raise HTTPException(status_code=403, detail=f"Bu kun hali ochilmagan. {day_date.isoformat()} kuni ochiladi")
+        raise HTTPException(status_code=403, detail=f"Bu kun hali ochilmagan. {day_date.isoformat()} kuni (00:00 Toshkent) ochiladi")
     # O'tgan kunlarni ham ishlab ko'rishga ruxsat etiladi
 
     # Tayinlov bor/yoqligini tekshirish

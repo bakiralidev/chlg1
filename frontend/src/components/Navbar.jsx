@@ -128,13 +128,15 @@ export default function Navbar() {
               >
                 Kirish
               </Link>
-              <Link
-                to="/register"
+              <a
+                href={import.meta.env.VITE_TELEGRAM_BOT_URL || 'https://t.me/pychallenge_uz_bot'}
+                target="_blank"
+                rel="noreferrer"
                 className="btn btn-primary"
                 style={{ padding: '0.4rem 1.1rem', fontSize: '0.85rem' }}
               >
                 Ro'yxatdan o'tish
-              </Link>
+              </a>
             </>
           ) : (
             <>

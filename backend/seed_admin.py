@@ -15,9 +15,13 @@ async def seed_admin():
             print("Yangi admin yaratilmoqda...")
             admin_user = User(
                 email="admin@pychallenge.uz",
+                login="admin",
                 password_hash=hash_password("admin123"),  # kuchli parolga almashtiring
                 username="Admin",
+                full_name="Admin",
                 is_admin=True,
+                status="confirmed",
+                must_change_password=False,
                 level=999
             )
             session.add(admin_user)

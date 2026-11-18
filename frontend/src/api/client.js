@@ -17,17 +17,24 @@ client.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor — 401 bo'lsa logout
+// Response interceptor — 401 bo'lsa logout, must_change_password bo'lsa /set-password
 client.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
       useAuthStore.getState().logout();
       const currentPath = window.location.pathname;
-      const isPublicPath = currentPath === '/' || currentPath === '/login' || currentPath === '/register' || currentPath.startsWith('/forgot') || currentPath.startsWith('/reset');
+      const isPublicPath = currentPath === '/' || currentPath === '/login';
       if (!isPublicPath) {
         window.location.href = '/login';
       }
+    } else if (
+      error.response?.status === 403 &&
+      error.response?.data?.detail === "Avval yangi parol o'rnating" &&
+      window.location.pathname !== '/set-password'
+    ) {
+      useAuthStore.getState().updateUser({ must_change_password: true });
+      window.location.href = '/set-password';
     }
     return Promise.reject(error);
   }
@@ -41,9 +48,9 @@ export default client;
 export const api = {
   // Auth
   login: (data) => client.post('/api/v1/auth/login', data),
-  register: (data) => client.post('/api/v1/auth/register', data),
-  forgotPassword: (email) => client.post('/api/v1/auth/forgot-password', { email }),
-  resetPassword: (data) => client.post('/api/v1/auth/reset-password', data),
+  setPassword: (new_password) => client.post('/api/v1/auth/set-password', { new_password }),
+  acceptConsent: () => client.post('/api/v1/auth/consent'),
+  getMe: () => client.get('/api/v1/auth/me'),
 
   // Challenges
   getChallenges: () => client.get('/api/v1/challenges'),

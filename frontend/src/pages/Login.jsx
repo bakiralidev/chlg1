@@ -1,21 +1,23 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { api } from '../api/client';
 import { useAuthStore } from '../store/authStore';
 
+const BOT_URL = import.meta.env.VITE_TELEGRAM_BOT_URL || 'https://t.me/pychallenge_uz_bot';
+
 export default function Login() {
   const navigate = useNavigate();
-  const login = useAuthStore((s) => s.login);
-  const [form, setForm] = useState({ email: '', password: '' });
+  const loginAction = useAuthStore((s) => s.login);
+  const [form, setForm] = useState({ login: '', password: '' });
   const [loading, setLoading] = useState(false);
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.email || !form.password) {
-      toast.error('Email va parolni kiriting');
+    if (!form.login || !form.password) {
+      toast.error('Login va parolni kiriting');
       return;
     }
     setLoading(true);
@@ -23,12 +25,23 @@ export default function Login() {
       const { data } = await api.login(form);
       const user = {
         id: data.user_id,
+        login: data.login,
         username: data.username,
+        full_name: data.full_name,
         is_admin: data.is_admin,
+        status: data.status,
+        must_change_password: data.must_change_password,
+        consent_version: data.consent_version,
+        rules_version: data.rules_version,
+        needs_consent: data.needs_consent,
       };
-      login(user, data.access_token);
-      toast.success("Xush kelibsiz!");
-      navigate('/dashboard');
+      loginAction(user, data.access_token);
+      toast.success('Xush kelibsiz!');
+      if (data.must_change_password) {
+        navigate('/set-password');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err) {
       const msg = err.response?.data?.detail || 'Kirish xatosi';
       toast.error(msg);
@@ -48,22 +61,22 @@ export default function Login() {
 
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label className="form-label" htmlFor="login-email">Email</label>
+              <label className="form-label" htmlFor="login-username">Login</label>
               <input
-                id="login-email"
-                type="email"
-                name="email"
+                id="login-username"
+                type="text"
+                name="login"
                 className="form-input"
-                placeholder="email@example.com"
-                value={form.email}
+                placeholder="u123456"
+                value={form.login}
                 onChange={handleChange}
-                autoComplete="email"
+                autoComplete="username"
                 required
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label" htmlFor="login-password">Parol</label>
+              <label className="form-label" htmlFor="login-password">Parol (yoki bir martalik parol)</label>
               <input
                 id="login-password"
                 type="password"
@@ -77,21 +90,17 @@ export default function Login() {
               />
             </div>
 
-            <div style={{ textAlign: 'right', marginBottom: '1.2rem' }}>
-              <Link to="/forgot-password" style={{ fontSize: '0.85rem' }}>
-                Parolni unutdingizmi?
-              </Link>
-            </div>
-
             <button id="login-submit" type="submit" className="btn btn-primary btn-full" disabled={loading}>
               {loading ? <span className="spinner" /> : null}
               {loading ? 'Kirish...' : 'Kirish'}
             </button>
           </form>
 
-          <p className="auth-footer">
-            Akkauntingiz yo'qmi?{' '}
-            <Link to="/register">Ro'yxatdan o'ting</Link>
+          <p className="auth-footer" style={{ lineHeight: 1.5 }}>
+            Ro'yxatdan o'tish va parolni tiklash uchun Telegram botga o'ting:{' '}
+            <a href={BOT_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', fontWeight: 600 }}>
+              Telegram bot
+            </a>
           </p>
         </div>
       </div>

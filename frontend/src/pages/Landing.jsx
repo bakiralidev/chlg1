@@ -324,13 +324,15 @@ export default function Landing() {
                 </Link>
               ) : (
                 <>
-                  <Link
-                    to="/register"
+                  <a
+                    href={import.meta.env.VITE_TELEGRAM_BOT_URL || 'https://t.me/pychallenge_uz_bot'}
+                    target="_blank"
+                    rel="noreferrer"
                     className="btn btn-primary"
                     style={{ padding: '0.85rem 2rem', fontSize: '1.05rem', borderRadius: 'var(--radius-md)' }}
                   >
-                    🎯 Musobaqaga qo'shilish (Bepul)
-                  </Link>
+                    🎯 Musobaqaga qo'shilish (Telegram)
+                  </a>
                   <a
                     href="#demo"
                     className="btn btn-secondary"
@@ -591,9 +593,9 @@ export default function Landing() {
                               <span style={{ fontSize: '0.85rem', color: 'var(--text-main)' }}>
                                 🎯 Haqiqiy 15 kunlik musobaqada qatnashishga tayyormisiz?
                               </span>
-                              <Link to="/register" className="btn btn-primary" style={{ padding: '0.35rem 0.9rem', fontSize: '0.8rem' }}>
-                                Ro'yxatdan o'tish →
-                              </Link>
+                              <a href={import.meta.env.VITE_TELEGRAM_BOT_URL || 'https://t.me/pychallenge_uz_bot'} target="_blank" rel="noreferrer" className="btn btn-primary" style={{ padding: '0.35rem 0.9rem', fontSize: '0.8rem' }}>
+                                Telegram botdan ro'yxatdan o'tish →
+                              </a>
                             </div>
                           )}
                         </div>
@@ -824,13 +826,15 @@ export default function Landing() {
                           Kunlarni ko'rish →
                         </Link>
                       ) : (
-                        <Link
-                          to="/register"
+                        <a
+                          href={import.meta.env.VITE_TELEGRAM_BOT_URL || 'https://t.me/pychallenge_uz_bot'}
+                          target="_blank"
+                          rel="noreferrer"
                           className="btn btn-primary"
                           style={{ padding: '0.7rem 1.6rem', fontSize: '0.95rem' }}
                         >
-                          Qatnashish (Ro'yxatdan o'tish) →
-                        </Link>
+                          Qatnashish (Telegram bot) →
+                        </a>
                       )}
                     </div>
                   </div>
@@ -917,13 +921,15 @@ export default function Landing() {
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
               {!user ? (
                 <>
-                  <Link
-                    to="/register"
+                  <a
+                    href={import.meta.env.VITE_TELEGRAM_BOT_URL || 'https://t.me/pychallenge_uz_bot'}
+                    target="_blank"
+                    rel="noreferrer"
                     className="btn btn-primary"
                     style={{ padding: '0.9rem 2.2rem', fontSize: '1.05rem', borderRadius: 'var(--radius-md)' }}
                   >
-                    Ro'yxatdan o'tish (Bepul)
-                  </Link>
+                    Ro'yxatdan o'tish (Telegram bot)
+                  </a>
                   <Link
                     to="/login"
                     className="btn btn-secondary"

@@ -1,4 +1,7 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger, Column, Integer, String, Boolean, ForeignKey,
+    DateTime, Text, UniqueConstraint, Index
+)
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -10,14 +13,38 @@ from app.db.database import Base
 class User(Base):
     __tablename__ = "users"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    email = Column(String(255), unique=True, nullable=False, index=True)
-    password_hash = Column(String(255), nullable=False)
+    email = Column(String(255), unique=True, nullable=True, index=True)
+    password_hash = Column(String(255), nullable=True)
     username = Column(String(100), nullable=False)
+    login = Column(String(50), unique=True, nullable=False, index=True)
+    telegram_id = Column(BigInteger, unique=True, nullable=True, index=True)
+    phone = Column(String(20), unique=True, nullable=True, index=True)
+    full_name = Column(String(200), nullable=True)
+    must_change_password = Column(Boolean, default=True, nullable=False)
+    status = Column(String(20), default="registered", nullable=False)
+    # status: registered | waitlist | confirmed | expired | disqualified | banned
+    consent_version = Column(Integer, nullable=True)
+    consent_at = Column(DateTime(timezone=True), nullable=True)
+    self_level = Column(String(20), nullable=True)
+    age_group = Column(String(20), nullable=True)
+    region = Column(String(100), nullable=True)
+    source = Column(String(100), nullable=True)
+    interest = Column(String(100), nullable=True)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    waitlisted_at = Column(DateTime(timezone=True), nullable=True)
+    promoted_at = Column(DateTime(timezone=True), nullable=True)
+    disqualified_reason = Column(Text, nullable=True)
+    notifications_muted = Column(Boolean, default=False, nullable=False)
+
     avatar_url = Column(Text, nullable=True)
     is_admin = Column(Boolean, default=False)
     level = Column(Integer, default=1)
     total_score = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    one_time_codes = relationship("OneTimeCode", back_populates="user", cascade="all, delete-orphan")
+    support_messages = relationship("SupportMessage", back_populates="user", cascade="all, delete-orphan")
+    consent_logs = relationship("ConsentLog", back_populates="user", cascade="all, delete-orphan")
 
 
 class Challenge(Base):
@@ -164,3 +191,50 @@ class ParticipantAIScore(Base):
         UniqueConstraint("challenge_id", "user_id", "day_id", "category",
                          name="uq_ai_score_per_category"),
     )
+
+
+class OneTimeCode(Base):
+    __tablename__ = "one_time_codes"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    code_hash = Column(String(255), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_one_time_codes_user_created", "user_id", "created_at"),
+    )
+
+    user = relationship("User", back_populates="one_time_codes")
+
+
+class SupportMessage(Base):
+    __tablename__ = "support_messages"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    text = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    answered = Column(Boolean, default=False, nullable=False)
+
+    user = relationship("User", back_populates="support_messages")
+
+
+class BroadcastLog(Base):
+    __tablename__ = "broadcast_log"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    admin_telegram_id = Column(BigInteger, nullable=False)
+    text = Column(Text, nullable=False)
+    sent_count = Column(Integer, default=0, nullable=False)
+    failed_count = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ConsentLog(Base):
+    __tablename__ = "consent_log"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    rules_version = Column(Integer, nullable=False)
+    agreed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    user = relationship("User", back_populates="consent_logs")

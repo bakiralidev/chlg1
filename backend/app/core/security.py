@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta, timezone
+import uuid
 import jwt
 from jwt.exceptions import InvalidTokenError as JWTError
 from passlib.context import CryptContext
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -13,6 +14,11 @@ from app.models.models import User
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer()
+
+_PASSWORD_CHANGE_ALLOWED_PATHS = {
+    "/api/v1/auth/set-password",
+    "/api/v1/auth/me",
+}
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
@@ -40,6 +46,7 @@ def verify_reset_token(token: str) -> str | None:
         return None
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db)
 ) -> User:
@@ -53,13 +60,27 @@ async def get_current_user(
         user_id: str = payload.get("sub")
         if user_id is None:
             raise credentials_exception
-    except JWTError:
+        user_uuid = uuid.UUID(user_id)
+    except (JWTError, ValueError):
         raise credentials_exception
 
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(select(User).where(User.id == user_uuid))
     user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception
+
+    if user.status == "banned":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Akkauntingiz bloklangan"
+        )
+
+    if user.must_change_password and request.url.path not in _PASSWORD_CHANGE_ALLOWED_PATHS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Avval yangi parol o'rnating"
+        )
+
     return user
 
 async def get_current_admin(current_user: User = Depends(get_current_user)) -> User:

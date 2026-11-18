@@ -7,9 +7,7 @@ import Landing from './pages/Landing';
 
 // Auth pages
 import Login from './pages/Login';
-import Register from './pages/Register';
-import ForgotPassword from './pages/ForgotPassword';
-import ResetPassword from './pages/ResetPassword';
+import SetPassword from './pages/SetPassword';
 
 // User pages
 import Dashboard from './pages/Dashboard';
@@ -47,9 +45,7 @@ export default function App() {
         {/* Public routes */}
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
-        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/set-password" element={<SetPassword />} />
 
         {/* Protected user routes */}
         <Route element={<ProtectedRoute />}>

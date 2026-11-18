@@ -8,6 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.database import async_session_maker
 from app.models.models import (
     ExamSession, UserQuestionAssignment, ChallengeDay,
@@ -17,7 +18,7 @@ from app.services.sandbox_service import run_code_in_sandbox
 
 logger = logging.getLogger(__name__)
 
-scheduler = AsyncIOScheduler(timezone="UTC")
+scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
 
 
 # ─── Helper: session uchun async session factory ─────────────────────────────
@@ -138,7 +139,7 @@ async def finalize_ended_challenges():
     'ended' ga o'tkazib, challenge_results ni hisoblaydi.
     """
     logger.info("[CRON] Challenge tugash tekshiruvi boshlandi")
-    now = datetime.now(timezone.utc)
+    now = settings.now_local()
 
     async with async_session_maker() as db:
         try:
@@ -150,7 +151,12 @@ async def finalize_ended_challenges():
 
             for challenge in challenges:
                 from datetime import timedelta
-                end_date = challenge.start_date + timedelta(days=challenge.total_days)
+                start_local = (
+                    challenge.start_date.astimezone(settings.tz)
+                    if challenge.start_date.tzinfo
+                    else challenge.start_date.replace(tzinfo=settings.tz)
+                )
+                end_date = start_local + timedelta(days=challenge.total_days)
                 if end_date > now:
                     continue  # Hali tugamagan
 
