@@ -1,95 +1,127 @@
-import asyncio
-import os
 import json
-import tempfile
 import time
 from typing import Any
 
+import httpx
 
-async def run_code_in_sandbox(code: str, test_cases: list[dict]) -> dict[str, Any]:
+from app.core.config import settings
+
+MAX_CODE_BYTES = 50 * 1024
+
+
+class RunnerUnavailableError(Exception):
+    """Raised when the isolated runner service is unreachable or overloaded."""
+
+
+async def execute_python_code(
+    code: str,
+    input_data: str = "",
+    timeout_seconds: float | None = None,
+) -> dict[str, Any]:
+    """Send Python code to the isolated runner service for execution."""
+    if len((code or "").encode("utf-8")) > MAX_CODE_BYTES:
+        return {
+            "stdout": "",
+            "stderr": "Kod hajmi 50 KB dan oshmasligi kerak.",
+            "exit_code": -1,
+            "timed_out": False,
+            "execution_ms": 0,
+            "truncated": False,
+        }
+
+    limit = timeout_seconds if timeout_seconds is not None else settings.RUNNER_TIMEOUT_SECS
+    url = f"{settings.RUNNER_URL.rstrip('/')}/run"
+
+    try:
+        async with httpx.AsyncClient(timeout=limit + 3.0) as client:
+            resp = await client.post(
+                url,
+                json={"code": code, "stdin": input_data or "", "time_limit_s": limit},
+            )
+    except httpx.HTTPError:
+        raise RunnerUnavailableError("Kod bajarish xizmati vaqtincha mavjud emas.")
+
+    if resp.status_code == 503:
+        raise RunnerUnavailableError("Tizim band, birozdan keyin qayta urining.")
+    if resp.status_code == 400:
+        detail = resp.json().get("detail", "Kod noto'g'ri")
+        return {
+            "stdout": "",
+            "stderr": detail,
+            "exit_code": -1,
+            "timed_out": False,
+            "execution_ms": 0,
+            "truncated": False,
+        }
+    resp.raise_for_status()
+    data = resp.json()
+    return {
+        "stdout": data.get("stdout", ""),
+        "stderr": data.get("stderr", ""),
+        "exit_code": data.get("exit_code", 0),
+        "timed_out": bool(data.get("timed_out", False)),
+        "execution_ms": int(data.get("duration_ms", 0)),
+        "truncated": bool(data.get("truncated", False)),
+    }
+
+
+async def run_code_in_sandbox(
+    code: str,
+    test_cases: list[dict[str, Any]],
+    *,
+    timeout_per_test: float | None = None,
+) -> dict[str, Any]:
     """
-    Docker sandbox ichida Python kodni ishga tushiradi va test keyslarni baholaydi.
-    --network none, --memory=128m, --cpus=0.5, --pids-limit=50, 5s timeout
+    Run user code against a list of test cases in the isolated runner.
+    Returns aggregated pass/fail/error/timeout result without leaking expected outputs.
     """
+    if not test_cases:
+        return {
+            "status": "error",
+            "passed": 0,
+            "total": 0,
+            "execution_ms": 0,
+            "results": [],
+            "output": "[]",
+        }
+
     passed = 0
     total = len(test_cases)
-    outputs = []
-    start_time = time.time()
+    results: list[dict[str, Any]] = []
+    start_time = time.monotonic()
 
-    # Har bir test keys uchun kodni ishga tushirish
-    for i, tc in enumerate(test_cases):
-        input_data = tc.get("input", "")
+    for idx, tc in enumerate(test_cases, start=1):
+        stdin_val = str(tc.get("input", ""))
         expected = str(tc.get("expected", "")).strip()
-
-        # Foydalanuvchi kodini + test wrapper ni birga yozish
-        wrapper = f"""{code}
-
-# Test runner
-import sys
-_input_data = {repr(input_data)}
-_lines = iter(_input_data.split('\\n'))
-import builtins
-_orig_input = builtins.input
-builtins.input = lambda *args, **kwargs: next(_lines, '')
-"""
-        # Vaqtinchalik fayl yaratish
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False, encoding="utf-8"
-        ) as f:
-            f.write(wrapper)
-            tmp_path = f.name
-
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "docker", "run", "--rm",
-                "--network", "none",
-                "--memory=128m",
-                "--cpus=0.5",
-                "--pids-limit=50",
-                "--read-only",
-                "-i",
-                f"--volume={tmp_path}:/app/solution.py:ro",
-                "python:3.11-alpine",
-                "python", "/app/solution.py",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            res = await execute_python_code(
+                code=code,
+                input_data=stdin_val,
+                timeout_seconds=timeout_per_test,
             )
+        except RunnerUnavailableError as err:
+            results.append({"test": idx, "status": "error", "error": str(err)})
+            continue
 
-            try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5.0)
-                actual = stdout.decode("utf-8", errors="replace").strip()
-                error_out = stderr.decode("utf-8", errors="replace").strip()
+        actual = (res.get("stdout") or "").strip()
+        if res.get("timed_out"):
+            results.append({"test": idx, "status": "timeout"})
+        elif res.get("exit_code", 0) != 0:
+            err_msg = (res.get("stderr") or "").strip()[:300]
+            results.append({"test": idx, "status": "error", "error": err_msg or "Runtime xatolik"})
+        elif actual == expected:
+            passed += 1
+            results.append({"test": idx, "status": "pass"})
+        else:
+            results.append({"test": idx, "status": "fail"})
 
-                if actual == expected:
-                    passed += 1
-                    outputs.append({"test": i + 1, "status": "pass", "output": actual})
-                else:
-                    outputs.append({
-                        "test": i + 1,
-                        "status": "fail",
-                        "output": actual,
-                        "expected": expected,
-                        "error": error_out[:300] if error_out else None
-                    })
-            except asyncio.TimeoutError:
-                proc.kill()
-                outputs.append({"test": i + 1, "status": "timeout", "output": ""})
-        except Exception as e:
-            outputs.append({"test": i + 1, "status": "error", "output": str(e)[:200]})
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
+    execution_ms = int((time.monotonic() - start_time) * 1000)
 
-    execution_ms = int((time.time() - start_time) * 1000)
-
-    # Umumiy status
     if passed == total:
         status = "pass"
-    elif any(o["status"] == "timeout" for o in outputs):
+    elif any(r["status"] == "timeout" for r in results):
         status = "timeout"
-    elif any(o["status"] == "error" for o in outputs):
+    elif any(r["status"] == "error" for r in results) and passed == 0:
         status = "error"
     else:
         status = "fail"
@@ -99,68 +131,6 @@ builtins.input = lambda *args, **kwargs: next(_lines, '')
         "passed": passed,
         "total": total,
         "execution_ms": execution_ms,
-        "output": json.dumps(outputs, ensure_ascii=False),
-    }
-
-
-async def execute_python_code(code: str, input_data: str = "", timeout_seconds: float = 5.0) -> dict[str, Any]:
-    """
-    Kodni Python subprocess orqali xavfsiz timeout bilan ishga tushiradi.
-    stdout, stderr, exit_code va execution_ms qaytaradi.
-    """
-    import sys
-    start_time = time.time()
-
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".py", delete=False, encoding="utf-8"
-    ) as f:
-        f.write(code)
-        tmp_path = f.name
-
-    stdout_str = ""
-    stderr_str = ""
-    exit_code = 0
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, tmp_path,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
-        try:
-            stdin_bytes = (input_data or "").encode("utf-8")
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(input=stdin_bytes),
-                timeout=timeout_seconds,
-            )
-            stdout_str = stdout_bytes.decode("utf-8", errors="replace")
-            stderr_str = stderr_bytes.decode("utf-8", errors="replace")
-            exit_code = proc.returncode if proc.returncode is not None else 0
-        except asyncio.TimeoutError:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-            stdout_str = ""
-            stderr_str = f"⏱️ Vaqt chegarasidan oshib ketdi (Timeout {timeout_seconds}s). Cheksiz tsikl (infinite loop) mavjud bo'lishi mumkin."
-            exit_code = -1
-    except Exception as e:
-        stdout_str = ""
-        stderr_str = f"Ishga tushirishda xato yuz berdi: {str(e)}"
-        exit_code = -1
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
-
-    execution_ms = int((time.time() - start_time) * 1000)
-
-    return {
-        "stdout": stdout_str,
-        "stderr": stderr_str,
-        "exit_code": exit_code,
-        "execution_ms": execution_ms,
+        "results": results,
+        "output": json.dumps(results, ensure_ascii=False),
     }

@@ -19,6 +19,33 @@ services:
     networks:
       - app_network
 
+  # ─── Isolated Code Runner ───────────────────────────────────────
+  runner:
+    build:
+      context: ./runner
+      dockerfile: Dockerfile
+    container_name: challenge_runner
+    restart: unless-stopped
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: "0.5"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - runner_net
+
   # ─── Backend (FastAPI) ──────────────────────────────────────────
   backend:
     build:
@@ -30,10 +57,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # Docker-in-Docker sandbox uchun
+      runner:
+        condition: service_healthy
     networks:
       - app_network
+      - runner_net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -90,3 +118,6 @@ volumes:
 networks:
   app_network:
     driver: bridge
+  runner_net:
+    driver: bridge
+    internal: true
