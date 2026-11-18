@@ -1,48 +1,52 @@
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_, select
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.ip_utils import get_client_ip
 from app.core.security import create_access_token, get_current_user, hash_password, verify_password
 from app.db.database import get_db
-from app.models.models import User
+from app.models.models import LoginAttempt, LoginEvent, User
 from app.schemas.auth import LoginRequest, SetPasswordRequest, TokenResponse
 from app.services.auth_service import record_consent, verify_otp_for_user
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
 
-# In-memory login brute-force protection: {login_key: {"count": int, "blocked_until": datetime | None}}
-_MAX_LOGIN_ATTEMPTS = 5
-_BLOCK_DURATION = timedelta(minutes=10)
-_login_attempts: dict[str, dict] = {}
+_MAX_LOGIN_IP_ATTEMPTS = 5
+_MAX_IP_TOTAL_ATTEMPTS = 30
+_BLOCK_WINDOW = timedelta(minutes=10)
 
 
-def _check_login_rate_limit(login_key: str, now: datetime) -> None:
-    entry = _login_attempts.get(login_key)
-    if not entry:
-        return
-    blocked_until = entry.get("blocked_until")
-    if blocked_until and blocked_until > now:
-        remaining_mins = max(1, int((blocked_until - now).total_seconds() // 60) + 1)
+async def _check_login_rate_limit(db: AsyncSession, login_key: str, ip: str, now: datetime) -> None:
+    cutoff = now - _BLOCK_WINDOW
+
+    pair_res = await db.execute(
+        select(func.count(LoginAttempt.id)).where(
+            LoginAttempt.login == login_key,
+            LoginAttempt.ip == ip,
+            LoginAttempt.success.is_(False),
+            LoginAttempt.created_at >= cutoff,
+        )
+    )
+    if int(pair_res.scalar() or 0) >= _MAX_LOGIN_IP_ATTEMPTS:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Juda ko'p noto'g'ri urinish. {remaining_mins} daqiqadan keyin urinib ko'ring."
+            detail="Juda ko'p noto'g'ri urinish. 10 daqiqadan keyin urinib ko'ring.",
         )
-    if blocked_until and blocked_until <= now:
-        _login_attempts.pop(login_key, None)
 
-
-def _record_failed_login(login_key: str, now: datetime) -> None:
-    entry = _login_attempts.get(login_key, {"count": 0, "blocked_until": None})
-    entry["count"] = entry.get("count", 0) + 1
-    if entry["count"] >= _MAX_LOGIN_ATTEMPTS:
-        entry["blocked_until"] = now + _BLOCK_DURATION
-    _login_attempts[login_key] = entry
-
-
-def _clear_failed_logins(login_key: str) -> None:
-    _login_attempts.pop(login_key, None)
+    ip_res = await db.execute(
+        select(func.count(LoginAttempt.id)).where(
+            LoginAttempt.ip == ip,
+            LoginAttempt.success.is_(False),
+            LoginAttempt.created_at >= cutoff,
+        )
+    )
+    if int(ip_res.scalar() or 0) >= _MAX_IP_TOTAL_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Ushbu IP manzildan juda ko'p noto'g'ri urinish. Keyinroq urinib ko'ring.",
+        )
 
 
 def _needs_consent(user: User) -> bool:
@@ -55,7 +59,7 @@ def _needs_consent(user: User) -> bool:
 async def register_disabled():
     raise HTTPException(
         status_code=status.HTTP_410_GONE,
-        detail="Sayt orqali ro'yxatdan o'tish o'chirilgan. Telegram bot orqali ro'yxatdan o'ting."
+        detail="Sayt orqali ro'yxatdan o'tish o'chirilgan. Telegram bot orqali ro'yxatdan o'ting.",
     )
 
 
@@ -63,7 +67,7 @@ async def register_disabled():
 async def forgot_password_disabled():
     raise HTTPException(
         status_code=status.HTTP_410_GONE,
-        detail="Email orqali parol tiklash o'chirilgan. Telegram botdan foydalaning."
+        detail="Email orqali parol tiklash o'chirilgan. Telegram botdan foydalaning.",
     )
 
 
@@ -71,17 +75,23 @@ async def forgot_password_disabled():
 async def reset_password_disabled():
     raise HTTPException(
         status_code=status.HTTP_410_GONE,
-        detail="Email orqali parol tiklash o'chirilgan. Telegram botdan foydalaning."
+        detail="Email orqali parol tiklash o'chirilgan. Telegram botdan foydalaning.",
     )
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(
+    data: LoginRequest,
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+):
     login_value = data.login.strip()
     login_key = login_value.lower()
+    client_ip = get_client_ip(request)
+    user_agent = (request.headers.get("user-agent", "")[:500] if request else None)
     now = datetime.now(timezone.utc)
 
-    _check_login_rate_limit(login_key, now)
+    await _check_login_rate_limit(db, login_key, client_ip, now)
 
     result = await db.execute(
         select(User).where(or_(User.login == login_value, User.email == login_value))
@@ -89,16 +99,17 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
     user = result.scalar_one_or_none()
 
     if not user:
-        _record_failed_login(login_key, now)
+        db.add(LoginAttempt(login=login_key, ip=client_ip, success=False, created_at=now))
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Login yoki parol noto'g'ri"
+            detail="Login yoki parol noto'g'ri",
         )
 
     if user.status == "banned":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Akkauntingiz bloklangan"
+            detail="Akkauntingiz bloklangan",
         )
 
     authenticated = False
@@ -106,17 +117,20 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
         authenticated = True
     elif await verify_otp_for_user(db, user, data.password, now=now):
         authenticated = True
-        await db.commit()
-        await db.refresh(user)
 
     if not authenticated:
-        _record_failed_login(login_key, now)
+        db.add(LoginAttempt(login=login_key, ip=client_ip, success=False, created_at=now))
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Login yoki parol noto'g'ri"
+            detail="Login yoki parol noto'g'ri",
         )
 
-    _clear_failed_logins(login_key)
+    db.add(LoginAttempt(login=login_key, ip=client_ip, success=True, created_at=now))
+    db.add(LoginEvent(user_id=user.id, ip=client_ip, user_agent=user_agent, created_at=now))
+    await db.commit()
+    await db.refresh(user)
+
     token = create_access_token(str(user.id))
     return TokenResponse(
         access_token=token,

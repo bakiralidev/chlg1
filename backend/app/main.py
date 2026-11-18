@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
+from app.core.config import settings
+from app.core.rate_limit import RateLimitMiddleware
 from app.routers import auth, admin, session, leaderboard
 from app.core.background_tasks import start_scheduler, stop_scheduler
 
@@ -27,11 +29,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=settings.allowed_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RateLimitMiddleware)
 
 # Routerlarni ulash
 app.include_router(auth.router)
