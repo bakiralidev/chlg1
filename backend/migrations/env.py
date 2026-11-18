@@ -15,7 +15,8 @@ from app.models.models import (  # noqa: F401
     User, Challenge, ChallengeDay, Question,
     UserQuestionAssignment, ExamSession, ViolationLog,
     Submission, ChallengeResult, ParticipantAIScore,
-    OneTimeCode, SupportMessage, BroadcastLog, ConsentLog
+    OneTimeCode, SupportMessage, BroadcastLog, ConsentLog,
+    ScoreAuditLog, LoginAttempt, LoginEvent
 )
 
 # Alembic Config object

@@ -18,7 +18,16 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://challenge_user:challenge_pass@localhost:5434/challenge_db"
     JWT_SECRET: str = "changeme_secret"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200  # 30 kun
+    JWT_EXPIRE_MINUTES: int = 4320  # 3 kun
+
+    # Security & Network
+    ALLOWED_ORIGINS: str = ""
+    TRUSTED_PROXY_CIDRS: str = "172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,127.0.0.1/32"
+    DEV_MODE: bool = False
+
+    # Runner (Sandbox)
+    RUNNER_URL: str = "http://runner:8080"
+    RUNNER_TIMEOUT_SECS: float = 5.0
 
     # Legacy SMTP (kept optional for backward compatibility)
     SMTP_HOST: str = "smtp.gmail.com"
@@ -94,6 +103,21 @@ class Settings(BaseSettings):
     @property
     def final_date_val(self) -> date:
         return date.fromisoformat(self.FINAL_DATE)
+
+    @property
+    def allowed_origins_list(self) -> list[str]:
+        origins = [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
+        if not origins:
+            origins = [self.SITE_URL.rstrip("/")]
+        if self.DEV_MODE:
+            for dev_origin in ("http://localhost:5173", "http://localhost:3000"):
+                if dev_origin not in origins:
+                    origins.append(dev_origin)
+        return origins
+
+    @property
+    def trusted_proxy_cidrs_list(self) -> list[str]:
+        return [c.strip() for c in self.TRUSTED_PROXY_CIDRS.split(",") if c.strip()]
 
 
 settings = Settings()

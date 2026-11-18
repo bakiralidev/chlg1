@@ -55,6 +55,7 @@ class Challenge(Base):
     total_days = Column(Integer, nullable=False)
     start_date = Column(DateTime(timezone=True), nullable=False)
     prize_info = Column(Text, nullable=True)
+    prize_amounts = Column(JSONB, nullable=True)  # e.g. [300000, 200000, 100000]
     status = Column(String(20), default="draft")  # draft | active | ended
     max_violations = Column(Integer, default=3)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
@@ -82,12 +83,17 @@ class Question(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     challenge_day_id = Column(UUID(as_uuid=True), ForeignKey("challenge_days.id", ondelete="CASCADE"), nullable=False)
     title = Column(String(300), nullable=False)
-    # question_type: "practical" (kod yozish) | "theoretical" (note yozish)
+    # question_type: "practical" | "quiz" | "theoretical"
     question_type = Column(String(20), nullable=False, default="practical")
     body_text = Column(Text, nullable=False)           # Savol matni (oddiy matn yoki HTML)
     difficulty = Column(String(10), nullable=False)    # easy | medium | hard
     starter_code = Column(Text, default="")            # Faqat practical uchun
-    test_cases = Column(JSONB, nullable=True)          # Endi ixtiyoriy
+    test_cases = Column(JSONB, nullable=True)          # Legacy/umumiy testlar
+    sample_tests = Column(JSONB, nullable=True)        # Ochiq testlar (ishtirokchiga ko'rinadi)
+    hidden_tests = Column(JSONB, nullable=True)        # Yashirin testlar (hech qachon yuborilmaydi)
+    options = Column(JSONB, nullable=True)             # Quiz variantlari ro'yxati
+    correct_option = Column(Integer, nullable=True)    # Quiz to'g'ri variant indeksi (yashirin)
+    reference_solution = Column(Text, nullable=True)   # Faqat admin uchun to'g'ri yechim
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     challenge_day = relationship("ChallengeDay", back_populates="questions")
@@ -125,6 +131,8 @@ class ExamSession(Base):
     note_content = Column(Text, nullable=True)     # Nazariy savol uchun izoh matni
     time_spent_secs = Column(Integer, nullable=True)  # Yechimga sarflangan vaqt (soniyada)
     is_readonly = Column(Boolean, default=False)
+    ip_address = Column(String(64), nullable=True)
+    user_agent = Column(String(500), nullable=True)
 
     assignment = relationship("UserQuestionAssignment", back_populates="sessions")
     violations = relationship("ViolationLog", back_populates="session")
@@ -146,16 +154,20 @@ class Submission(Base):
     session_id = Column(UUID(as_uuid=True), ForeignKey("exam_sessions.id"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     challenge_day_id = Column(UUID(as_uuid=True), ForeignKey("challenge_days.id"), nullable=False)
-    # Submission turi: "practical" | "theoretical"
+    # Submission turi: "practical" | "quiz" | "theoretical"
     submission_type = Column(String(20), nullable=False, default="practical")
     code = Column(Text, nullable=True)             # Amaliy uchun kod
     note_content = Column(Text, nullable=True)     # Nazariy uchun izoh
+    selected_option = Column(Integer, nullable=True)  # Quiz tanlangan variant (asl indeks)
     # Yuborilgan fayl mazmuni (savol + javob birgalikda)
     file_content = Column(Text, nullable=True)
-    result = Column(String(20), nullable=True)     # pass | fail | error | timeout | manual_review
+    result = Column(String(20), nullable=True)     # pass | fail | error | timeout | manual_review | graded
     score = Column(Integer, default=0)
     execution_ms = Column(Integer, nullable=True)
     docker_output = Column(Text, nullable=True)
+    graded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    graded_at = Column(DateTime(timezone=True), nullable=True)
+    grade_reason = Column(Text, nullable=True)
     submitted_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -167,8 +179,12 @@ class ChallengeResult(Base):
     total_score = Column(Integer, default=0)
     days_completed = Column(Integer, default=0)
     final_rank = Column(Integer, nullable=True)
+    is_tie = Column(Boolean, default=False, nullable=False)
     is_winner = Column(Boolean, default=False)
+    prize_amount = Column(Integer, nullable=True)
+    final_note = Column(Text, nullable=True)
     prize_received = Column(Boolean, default=False)
+    prize_paid_at = Column(DateTime(timezone=True), nullable=True)
     finalized_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (UniqueConstraint("challenge_id", "user_id", name="uq_challenge_user_result"),)
@@ -238,3 +254,33 @@ class ConsentLog(Base):
     agreed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     user = relationship("User", back_populates="consent_logs")
+
+
+class ScoreAuditLog(Base):
+    __tablename__ = "score_audit_log"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    submission_id = Column(UUID(as_uuid=True), ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    admin_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    old_score = Column(Integer, nullable=False)
+    new_score = Column(Integer, nullable=False)
+    reason = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class LoginAttempt(Base):
+    __tablename__ = "login_attempts"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    login = Column(String(100), nullable=False, index=True)
+    ip = Column(String(64), nullable=False, index=True)
+    success = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
+class LoginEvent(Base):
+    __tablename__ = "login_events"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    ip = Column(String(64), nullable=False)
+    user_agent = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
