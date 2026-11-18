@@ -168,7 +168,10 @@ async def register_telegram_user(
     await _acquire_capacity_lock(db)
 
     active_count_res = await db.execute(
-        select(func.count(User.id)).where(User.status.in_(["registered", "confirmed"]))
+        select(func.count(User.id)).where(
+            User.is_admin.is_(False),
+            User.status.in_(["registered", "confirmed"]),
+        )
     )
     active_count = int(active_count_res.scalar() or 0)
 
@@ -267,7 +270,10 @@ async def expire_and_promote_waitlist(
     await db.flush()
 
     active_count_res = await db.execute(
-        select(func.count(User.id)).where(User.status.in_(["registered", "confirmed"]))
+        select(func.count(User.id)).where(
+            User.is_admin.is_(False),
+            User.status.in_(["registered", "confirmed"]),
+        )
     )
     active_count = int(active_count_res.scalar() or 0)
     free_slots = max(0, settings.MAX_PARTICIPANTS - active_count)
