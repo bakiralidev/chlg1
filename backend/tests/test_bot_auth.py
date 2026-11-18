@@ -26,9 +26,7 @@ from conftest import run_coro
 
 @pytest.fixture(autouse=True)
 def _clear_login_attempts():
-    auth_router._login_attempts.clear()
     yield
-    auth_router._login_attempts.clear()
 
 
 def _make_request(path: str):
@@ -207,7 +205,7 @@ def test_auth_otp_login_must_change_password_and_confirmed_guard(db_session, mon
         await db_session.commit()
 
         # 3. Login with login + OTP
-        token_resp = await auth_router.login(LoginRequest(login=user.login, password=otp_plain), db_session)
+        token_resp = await auth_router.login(LoginRequest(login=user.login, password=otp_plain), db=db_session)
         assert token_resp.must_change_password is True
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token_resp.access_token)
 
@@ -225,15 +223,15 @@ def test_auth_otp_login_must_change_password_and_confirmed_guard(db_session, mon
 
         # OTP cannot be reused; new password works
         with pytest.raises(HTTPException) as exc_reuse:
-            await auth_router.login(LoginRequest(login=user.login, password=otp_plain), db_session)
+            await auth_router.login(LoginRequest(login=user.login, password=otp_plain), db=db_session)
         assert exc_reuse.value.status_code == 401
 
-        ok_resp = await auth_router.login(LoginRequest(login=user.login, password="StrongPass123"), db_session)
+        ok_resp = await auth_router.login(LoginRequest(login=user.login, password="StrongPass123"), db=db_session)
         assert ok_resp.must_change_password is False
 
         # 6. User with status='registered' (not 'confirmed') cannot enter day
         with pytest.raises(HTTPException) as exc_status:
-            await session_router.enter_day(str(day.id), db_session, user)
+            await session_router.enter_day(str(day.id), db=db_session, current_user=user)
         assert exc_status.value.status_code == 403
 
     run_coro(_run())
@@ -255,11 +253,11 @@ def test_login_brute_force_lockout(db_session):
 
         for _ in range(5):
             with pytest.raises(HTTPException) as exc:
-                await auth_router.login(LoginRequest(login="u400001", password="WrongPassword1"), db_session)
+                await auth_router.login(LoginRequest(login="u400001", password="WrongPassword1"), db=db_session)
             assert exc.value.status_code == 401
 
         with pytest.raises(HTTPException) as exc_lock:
-            await auth_router.login(LoginRequest(login="u400001", password="WrongPassword1"), db_session)
+            await auth_router.login(LoginRequest(login="u400001", password="WrongPassword1"), db=db_session)
         assert exc_lock.value.status_code == 429
 
     run_coro(_run())

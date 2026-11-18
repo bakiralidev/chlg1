@@ -226,7 +226,7 @@ async def enter_day(
             detail=status_messages.get(current_user.status, "Challenge'ga kirishga ruxsat yo'q"),
         )
 
-    now = datetime.now(timezone.utc)
+    now = settings.now_local().astimezone(timezone.utc)
     today = settings.today_local()
     if not current_user.is_admin and today < settings.challenge_start:
         raise HTTPException(
@@ -471,7 +471,10 @@ async def submit_code(
     session = await _get_active_session(session_id, current_user.id, db)
 
     now = datetime.now(timezone.utc)
-    if session.expires_at < now - timedelta(seconds=3):
+    expires_at = session.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < now - timedelta(seconds=3):
         session.status = "expired"
         session.is_readonly = True
         await db.commit()

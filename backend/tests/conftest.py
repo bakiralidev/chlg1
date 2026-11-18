@@ -72,6 +72,9 @@ class _SyncAsAsyncSession:
     def add(self, obj):
         return self._s.add(obj)
 
+    def add_all(self, objs):
+        return self._s.add_all(objs)
+
     def get_bind(self):
         return self._s.get_bind()
 

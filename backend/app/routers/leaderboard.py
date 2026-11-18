@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,11 @@ async def get_my_rank(
     current_user: User = Depends(get_current_user),
 ):
     """Return ONLY the authenticated user's own rank and score (never other users' scores)."""
-    ch_res = await db.execute(select(Challenge).where(Challenge.id == challenge_id))
+    try:
+        ch_uuid = uuid.UUID(challenge_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="Challenge topilmadi")
+    ch_res = await db.execute(select(Challenge).where(Challenge.id == ch_uuid))
     challenge = ch_res.scalar_one_or_none()
     if not challenge:
         raise HTTPException(status_code=404, detail="Challenge topilmadi")
@@ -42,7 +47,11 @@ async def get_leaderboard(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ch_res = await db.execute(select(Challenge).where(Challenge.id == challenge_id))
+    try:
+        ch_uuid = uuid.UUID(challenge_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="Challenge topilmadi")
+    ch_res = await db.execute(select(Challenge).where(Challenge.id == ch_uuid))
     challenge = ch_res.scalar_one_or_none()
     if not challenge:
         raise HTTPException(status_code=404, detail="Challenge topilmadi")
@@ -93,7 +102,11 @@ async def finalize_challenge(
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Faqat adminlar uchun")
 
-    ch_res = await db.execute(select(Challenge).where(Challenge.id == challenge_id))
+    try:
+        ch_uuid = uuid.UUID(challenge_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="Challenge topilmadi")
+    ch_res = await db.execute(select(Challenge).where(Challenge.id == ch_uuid))
     challenge = ch_res.scalar_one_or_none()
     if not challenge:
         raise HTTPException(status_code=404, detail="Challenge topilmadi")
