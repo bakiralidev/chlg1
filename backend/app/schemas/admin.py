@@ -62,6 +62,11 @@ class QuestionCreate(BaseModel):
     difficulty: str
     starter_code: str = ""
     test_cases: Optional[List[TestCase]] = None
+    sample_tests: Optional[List[TestCase]] = None
+    hidden_tests: Optional[List[TestCase]] = None
+    options: Optional[List[str]] = None
+    correct_option: Optional[int] = None
+    reference_solution: Optional[str] = None
 
     @field_validator("difficulty")
     @classmethod
@@ -73,8 +78,8 @@ class QuestionCreate(BaseModel):
     @field_validator("question_type")
     @classmethod
     def validate_question_type(cls, v):
-        if v not in ("practical", "theoretical"):
-            raise ValueError("question_type: practical yoki theoretical bolishi kerak")
+        if v not in ("practical", "quiz", "theoretical"):
+            raise ValueError("question_type: practical, quiz yoki theoretical bolishi kerak")
         return v
 
 
@@ -110,5 +115,36 @@ class AIScoreImportResult(BaseModel):
 # --- Manual Grading -------------------------------------------
 class GradeRequest(BaseModel):
     score: int
-    result: Optional[str] = 'graded'
+    result: Optional[str] = "graded"
+    reason: str
     notes: Optional[str] = None
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Baholash sababi (reason) majburiy")
+        return v.strip()
+
+
+# --- Finalists & Prizes ---------------------------------------
+class FinalResultEntry(BaseModel):
+    user_id: str
+    final_rank: int
+    prize_amount: Optional[int] = None
+
+
+class FinalResultRequest(BaseModel):
+    results: List[FinalResultEntry]
+    reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def validate_final_reason(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Final natija sababi majburiy")
+        return v.strip()
+
+
+class PrizePaidRequest(BaseModel):
+    user_id: str

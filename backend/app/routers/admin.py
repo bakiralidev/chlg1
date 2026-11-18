@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+import difflib
+import re
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
@@ -10,15 +13,19 @@ import openpyxl
 from app.db.database import get_db
 from app.models.models import (
     Challenge, ChallengeDay, Question, ExamSession,
-    Submission, User, UserQuestionAssignment, ParticipantAIScore, ViolationLog
+    Submission, User, UserQuestionAssignment, ParticipantAIScore, ViolationLog,
+    ChallengeResult, ScoreAuditLog, LoginEvent
 )
 from app.schemas.admin import (
     ChallengeCreate, ChallengeResponse,
     DayCreate, DayResponse,
     QuestionCreate, QuestionResponse,
-    ChallengeStats, AIScoreImportResult, GradeRequest
+    ChallengeStats, AIScoreImportResult, GradeRequest,
+    FinalResultRequest, PrizePaidRequest
 )
 from app.core.security import get_current_admin
+from app.services.ranking import get_ranking
+from app.services.scoring import recalculate_total
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 
@@ -893,10 +900,11 @@ async def grade_submission(
     db: AsyncSession = Depends(get_db),
     admin=Depends(get_current_admin)
 ):
-    """Ishtirokchi topshirig'ini to'g'ridan-to'g'ri baholash (0-100 ball va izoh)."""
+    """Ishtirokchi topshirig'ini to'g'ridan-to'g'ri baholash (0-100 ball, majburiy sabab va audit log)."""
     if data.score < 0 or data.score > 100:
         raise HTTPException(status_code=400, detail="Ball 0 dan 100 gacha bo'lishi kerak")
 
+    now = datetime.now(timezone.utc)
     sub_res = await db.execute(select(Submission).where(Submission.id == item_id))
     sub = sub_res.scalar_one_or_none()
 
@@ -915,6 +923,7 @@ async def grade_submission(
         )
         assignment = assign_res.scalar_one()
 
+        old_score = 0
         sub = Submission(
             session_id=sess.id,
             user_id=sess.user_id,
@@ -924,25 +933,36 @@ async def grade_submission(
             note_content=sess.note_content or "",
             score=data.score,
             result=data.result or ("pass" if data.score >= 60 else "fail"),
-            docker_output=f"[Admin bahosi]: {data.notes}" if data.notes else None,
+            docker_output=f"[Admin bahosi]: {data.notes or data.reason}",
+            graded_by=admin.id,
+            graded_at=now,
+            grade_reason=data.reason,
         )
         db.add(sub)
         await db.flush()
     else:
+        old_score = sub.score or 0
         sub.score = data.score
         sub.result = data.result or ("pass" if data.score >= 60 else "fail")
+        sub.graded_by = admin.id
+        sub.graded_at = now
+        sub.grade_reason = data.reason
         if data.notes:
             sub.docker_output = (sub.docker_output or "") + f"\n[Admin bahosi]: {data.notes}"
 
-    total_res = await db.execute(
-        select(func.sum(Submission.score)).where(Submission.user_id == sub.user_id)
+    db.add(
+        ScoreAuditLog(
+            submission_id=sub.id,
+            user_id=sub.user_id,
+            admin_id=admin.id,
+            old_score=old_score,
+            new_score=data.score,
+            reason=data.reason,
+            created_at=now,
+        )
     )
-    user_total = total_res.scalar() or 0
-
-    user_res = await db.execute(select(User).where(User.id == sub.user_id))
-    user = user_res.scalar_one_or_none()
-    if user:
-        user.total_score = int(user_total)
+    await db.flush()
+    user_total = await recalculate_total(db, sub.user_id)
 
     await db.commit()
     await db.refresh(sub)
@@ -952,6 +972,222 @@ async def grade_submission(
         "id": str(sub.id),
         "score": sub.score,
         "result": sub.result,
-        "user_total_score": int(user_total),
+        "user_total_score": user_total,
         "message": "Yechim muvaffaqiyatli baholandi!",
+    }
+
+
+@router.get("/challenges/{challenge_id}/finalists")
+async def get_challenge_finalists(
+    challenge_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    """Top 5 finalist va 6-7-o'rindagi zaxira nomzodlarni tenglik belgilari bilan qaytaradi."""
+    ch_res = await db.execute(select(Challenge).where(Challenge.id == challenge_id))
+    challenge = ch_res.scalar_one_or_none()
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Challenge topilmadi")
+
+    ranking = await get_ranking(db, challenge.id)
+    top_candidates = ranking[:7]
+    return {
+        "challenge_id": str(challenge.id),
+        "challenge_name": challenge.name,
+        "default_prizes": challenge.prize_amounts or [300000, 200000, 100000],
+        "finalists": [
+            {
+                "user_id": str(e["user_id"]),
+                "login": e["login"],
+                "username": e["username"],
+                "full_name": e["full_name"],
+                "rank": e["rank"],
+                "is_tie": e["is_tie"],
+                "is_reserve": idx >= 5,
+                "total_score": e["total_score"],
+                "days_completed": e["days_completed"],
+                "total_violations": e["total_violations"],
+                "total_time_spent_secs": e["total_time_spent_secs"],
+            }
+            for idx, e in enumerate(top_candidates)
+        ],
+    }
+
+
+@router.post("/challenges/{challenge_id}/final-result")
+async def set_final_results(
+    challenge_id: str,
+    data: FinalResultRequest,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    """Admin jonli suhbatdan keyin final tartibini (1-3 o'rin g'oliblar va mukofot) belgilaydi."""
+    ch_res = await db.execute(select(Challenge).where(Challenge.id == challenge_id))
+    challenge = ch_res.scalar_one_or_none()
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Challenge topilmadi")
+
+    default_prizes = challenge.prize_amounts or [300000, 200000, 100000]
+    now = datetime.now(timezone.utc)
+
+    for entry in data.results:
+        res = await db.execute(
+            select(ChallengeResult).where(
+                ChallengeResult.challenge_id == challenge.id,
+                ChallengeResult.user_id == entry.user_id,
+            )
+        )
+        cr = res.scalar_one_or_none()
+        if not cr:
+            cr = ChallengeResult(
+                challenge_id=challenge.id,
+                user_id=entry.user_id,
+                finalized_at=now,
+            )
+            db.add(cr)
+
+        cr.final_rank = entry.final_rank
+        cr.final_note = data.reason
+        if 1 <= entry.final_rank <= 3:
+            cr.is_winner = True
+            cr.prize_amount = (
+                entry.prize_amount
+                if entry.prize_amount is not None
+                else default_prizes[entry.final_rank - 1]
+            )
+        else:
+            cr.is_winner = False
+            cr.prize_amount = entry.prize_amount
+
+    await db.commit()
+    return {"ok": True, "message": "Final natijalar saqlandi"}
+
+
+@router.post("/challenges/{challenge_id}/prize-paid")
+async def mark_prize_paid(
+    challenge_id: str,
+    data: PrizePaidRequest,
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    res = await db.execute(
+        select(ChallengeResult).where(
+            ChallengeResult.challenge_id == challenge_id,
+            ChallengeResult.user_id == data.user_id,
+        )
+    )
+    cr = res.scalar_one_or_none()
+    if not cr:
+        raise HTTPException(status_code=404, detail="Natija topilmadi")
+
+    cr.prize_received = True
+    cr.prize_paid_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True, "prize_paid_at": cr.prize_paid_at}
+
+
+def _normalize_code_for_similarity(code: str) -> str:
+    no_comments = re.sub(r"#.*", "", code or "")
+    return re.sub(r"\s+", "", no_comments)
+
+
+@router.get("/suspicious")
+async def get_suspicious_activity(
+    db: AsyncSession = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    """
+    Faqat o'qish uchun shubhali holatlar dalil ro'yxati (avtomatik diskvalifikatsiya YO'Q).
+    """
+    # 1. Shared IP + User-Agent groups
+    le_res = await db.execute(
+        select(LoginEvent.ip, LoginEvent.user_agent, User.id, User.login, User.username, User.full_name)
+        .join(User, LoginEvent.user_id == User.id)
+        .where(User.is_admin.is_(False))
+    )
+    ip_ua_groups: dict[tuple[str, str], dict[str, dict]] = {}
+    for row in le_res.all():
+        key = (row.ip or "", row.user_agent or "")
+        ip_ua_groups.setdefault(key, {})[str(row.id)] = {
+            "user_id": str(row.id),
+            "login": row.login,
+            "username": row.username,
+            "full_name": row.full_name or row.username,
+        }
+
+    shared_ip_ua = [
+        {"ip": k[0], "user_agent": k[1], "users": list(users_map.values())}
+        for k, users_map in ip_ua_groups.items()
+        if len(users_map) >= 2
+    ]
+
+    # 2. Code similarity >= 0.90 per question
+    sub_res = await db.execute(
+        select(
+            Submission.id,
+            Submission.code,
+            Submission.score,
+            UserQuestionAssignment.question_id,
+            Question.title.label("question_title"),
+            Question.body_text.label("body_text"),
+            User.id.label("user_id"),
+            User.login,
+            User.username,
+            ExamSession.time_spent_secs,
+        )
+        .join(ExamSession, Submission.session_id == ExamSession.id)
+        .join(UserQuestionAssignment, ExamSession.assignment_id == UserQuestionAssignment.id)
+        .join(Question, UserQuestionAssignment.question_id == Question.id)
+        .join(User, Submission.user_id == User.id)
+        .where(Submission.submission_type == "practical", Submission.code.is_not(None))
+    )
+    rows = sub_res.all()
+
+    by_question: dict[str, list] = {}
+    fast_solutions = []
+    for r in rows:
+        qid = str(r.question_id)
+        by_question.setdefault(qid, []).append(r)
+        min_expected_secs = max(10, len(r.body_text or "") // 20)
+        if (r.score or 0) >= 80 and r.time_spent_secs is not None and r.time_spent_secs < min_expected_secs:
+            fast_solutions.append(
+                {
+                    "submission_id": str(r.id),
+                    "question_title": r.question_title,
+                    "user_login": r.login,
+                    "username": r.username,
+                    "score": r.score,
+                    "time_spent_secs": r.time_spent_secs,
+                    "threshold_secs": min_expected_secs,
+                }
+            )
+
+    similar_solutions = []
+    for qid, q_subs in by_question.items():
+        if len(q_subs) < 2:
+            continue
+        norm_list = [(r, _normalize_code_for_similarity(r.code)) for r in q_subs]
+        for i in range(len(norm_list)):
+            for j in range(i + 1, len(norm_list)):
+                r1, c1 = norm_list[i]
+                r2, c2 = norm_list[j]
+                if r1.user_id == r2.user_id or not c1 or not c2:
+                    continue
+                ratio = difflib.SequenceMatcher(None, c1, c2).ratio()
+                if ratio >= 0.90:
+                    similar_solutions.append(
+                        {
+                            "question_id": qid,
+                            "question_title": r1.question_title,
+                            "similarity": round(ratio, 3),
+                            "user_a": {"login": r1.login, "username": r1.username},
+                            "user_b": {"login": r2.login, "username": r2.username},
+                        }
+                    )
+
+    return {
+        "warning": "Diqqat: bir xil IP manzil bitta xonadon yoki umumiy tarmoq bo'lishi mumkin. Avtomatik chora ko'rilmaydi.",
+        "shared_ip_ua": shared_ip_ua,
+        "similar_solutions": similar_solutions,
+        "fast_solutions": fast_solutions,
     }
