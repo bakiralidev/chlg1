@@ -9,13 +9,15 @@ from sqlalchemy import func, select, update
 
 from app.core.config import settings
 from app.db.database import async_session_maker
-from app.models.models import ExamSession, Submission, SupportMessage, User, ViolationLog
+from app.models.models import Challenge, ExamSession, Submission, SupportMessage, User, ViolationLog
 from app.services.auth_service import (
     OtpRateLimitError,
     confirm_participation,
     create_otp_for_user,
     get_waitlist_position,
 )
+from app.services.ranking import get_user_rank
+from app.services.scoring import recalculate_total
 from bot.keyboards import (
     BTN_CONTACT_ADMIN,
     BTN_MY_RESULTS,
@@ -113,34 +115,42 @@ async def handle_my_results(message: Message) -> None:
             )
             return
 
-        days_res = await db.execute(
-            select(func.count(func.distinct(Submission.challenge_day_id))).where(
-                Submission.user_id == user.id
-            )
+        total_score = await recalculate_total(db, user.id)
+        ch_res = await db.execute(
+            select(Challenge)
+            .where(Challenge.status.in_(["active", "ended"]))
+            .order_by(Challenge.start_date.desc())
         )
-        days_submitted = int(days_res.scalar() or 0)
+        challenge = ch_res.scalars().first()
+        rank_info = await get_user_rank(db, challenge.id, user.id) if challenge else None
 
-        rank_res = await db.execute(
-            select(func.count(User.id)).where(
-                User.status == "confirmed",
-                User.total_score > (user.total_score or 0),
+        if rank_info:
+            days_submitted = rank_info["days_completed"]
+            rank_str = f"#{rank_info['rank']} / jami {rank_info['total_participants']}"
+            if rank_info["is_tie"]:
+                rank_str += " (tenglik)"
+            violations_count = rank_info["total_violations"]
+        else:
+            days_res = await db.execute(
+                select(func.count(func.distinct(Submission.challenge_day_id))).where(
+                    Submission.user_id == user.id
+                )
             )
-        )
-        rank = int(rank_res.scalar() or 0) + 1
-
-        viol_res = await db.execute(
-            select(func.count(ViolationLog.id))
-            .join(ExamSession, ViolationLog.session_id == ExamSession.id)
-            .where(ExamSession.user_id == user.id)
-        )
-        violations_count = int(viol_res.scalar() or 0)
+            days_submitted = int(days_res.scalar() or 0)
+            viol_res = await db.execute(
+                select(func.count(ViolationLog.id))
+                .join(ExamSession, ViolationLog.session_id == ExamSession.id)
+                .where(ExamSession.user_id == user.id)
+            )
+            violations_count = int(viol_res.scalar() or 0)
+            rank_str = "-"
 
     await message.answer(
         f"📊 <b>Mening natijam</b>\n\n"
         f"👤 Ism: {escape_html(user.full_name or user.username)}\n"
-        f"🏆 Umumiy ball: <b>{user.total_score or 0}</b>\n"
+        f"🏆 Umumiy ball: <b>{total_score}</b>\n"
         f"📅 Topshirilgan kunlar: <b>{days_submitted}</b>\n"
-        f"🥇 Joriy o'rin: <b>#{rank}</b>\n"
+        f"🥇 Joriy o'rin: <b>{rank_str}</b>\n"
         f"⚠️ Qoidabuzarliklar: <b>{violations_count}</b>",
         parse_mode="HTML",
     )

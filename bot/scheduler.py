@@ -150,7 +150,7 @@ async def send_morning_challenge_reminder(bot: Bot) -> None:
         await asyncio.sleep(0.04)
 
 
-async def send_evening_challenge_reminder(bot: Bot) -> None:
+async def send_evening_challenge_reminder(bot: Bot, remaining_text: str = "4 soat") -> None:
     today = settings.today_local()
     if not (settings.challenge_start <= today <= settings.final_date_val):
         return
@@ -179,8 +179,8 @@ async def send_evening_challenge_reminder(bot: Bot) -> None:
             await bot.send_message(
                 chat_id=tg_id,
                 text=(
-                    "⏰ <b>Kun yopilishiga 4 soat qoldi!</b>\n"
-                    "Bugungi topshiriqni hali topshirmagansiz. Toshkent vaqti bilan 23:59 gacha ulguring!"
+                    f"⏰ <b>Kun yopilishiga {remaining_text} qoldi!</b>\n"
+                    "Bugungi topshiriqni hali topshirmagansiz. Toshkent vaqti bilan 23:59 da kun yopiladi!"
                 ),
                 parse_mode="HTML",
             )
@@ -231,8 +231,17 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         trigger="cron",
         hour=20,
         minute=0,
-        args=[bot],
+        args=[bot, "4 soat"],
         id="bot_evening_reminder",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        send_evening_challenge_reminder,
+        trigger="cron",
+        hour=22,
+        minute=30,
+        args=[bot, "1.5 soat"],
+        id="bot_late_evening_reminder",
         replace_existing=True,
     )
     return scheduler
