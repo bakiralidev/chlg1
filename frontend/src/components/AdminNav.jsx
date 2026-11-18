@@ -8,6 +8,7 @@ export default function AdminNav() {
     { path: '/admin/participants', label: '👥 Ishtirokchilar' },
     { path: '/admin/submissions', label: '📝 Yechimlar va Baholash' },
     { path: '/admin/scores', label: '🤖 AI Baholash' },
+    { path: '/admin/suspicious', label: '🕵️ Shubhali holatlar' },
   ];
 
   const isTabActive = (tab) => {

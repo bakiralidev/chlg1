@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import DOMPurify from "dompurify";
 import Editor from "@monaco-editor/react";
 import { toast } from "react-hot-toast";
 import { api } from "../api/client";
@@ -383,6 +384,8 @@ export default function Arena() {
   const codeRef = useRef("");
   const [note, setNote] = useState("");
   const noteRef = useRef("");
+  const [selectedOption, setSelectedOption] = useState(null);
+  const selectedOptionRef = useRef(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState(null);
   const [violationData, setViolationData] = useState(null);
@@ -435,7 +438,9 @@ export default function Arena() {
     try {
       const payload = sessionData.question_type === "practical"
         ? { code: codeRef.current || "" }
-        : { note_content: noteRef.current || "" };
+        : sessionData.question_type === "quiz"
+          ? { selected_option: selectedOptionRef.current }
+          : { note_content: noteRef.current || "" };
       const { data } = await api.submitCode(sessionData.session_id, payload);
       setSubmitResult(data);
     } catch (e) {
@@ -586,7 +591,9 @@ export default function Arena() {
     try {
       const payload = sessionData.question_type === "practical"
         ? { code }
-        : { note_content: note };
+        : sessionData.question_type === "quiz"
+          ? { selected_option: selectedOption }
+          : { note_content: note };
       const { data } = await api.submitCode(sessionData.session_id, payload);
       setSubmitResult(data);
     } catch (err) {
@@ -599,6 +606,14 @@ export default function Arena() {
   const isReadonly = sessionData?.is_readonly || isExpired;
   const timerClass = `timer-display ${timerStatus === "danger" ? "danger" : timerStatus === "warning" ? "warning" : ""}`;
   const isPractical = sessionData?.question_type === "practical";
+  const isQuiz = sessionData?.question_type === "quiz";
+  const sanitizedBody = sessionData?.question_body
+    ? DOMPurify.sanitize(sessionData.question_body, {
+        ALLOWED_TAGS: ["p", "br", "strong", "em", "code", "pre", "ul", "ol", "li", "h3", "h4", "table", "tr", "td", "th", "span", "a"],
+        ALLOWED_ATTR: ["href", "target", "rel"],
+        ALLOWED_URI_REGEXP: /^https:\/\//i,
+      })
+    : "";
 
   const violationsCount = violationData?.violations_count ?? sessionData?.violations_count ?? 0;
   const maxViolations = violationData?.max_allowed ?? sessionData?.max_violations ?? 3;
@@ -709,10 +724,23 @@ export default function Arena() {
           <span className="badge badge-purple" style={{ marginBottom: "0.75rem", display: "inline-block" }}>
             {isPractical ? "📋 Savol sharti" : "📝 Topshiriq"}
           </span>
-          {sessionData?.question_body ? (
-            <div dangerouslySetInnerHTML={{ __html: sessionData.question_body }} style={{ maxWidth: "100%", lineHeight: 1.7, color: "var(--text-primary)" }} />
+          {sanitizedBody ? (
+            <div dangerouslySetInnerHTML={{ __html: sanitizedBody }} style={{ maxWidth: "100%", lineHeight: 1.7, color: "var(--text-primary)" }} />
           ) : (
             <p style={{ color: "var(--text-dim)" }}>Savol matni yuklanmadi</p>
+          )}
+          {isPractical && sessionData?.sample_tests?.length > 0 && (
+            <div style={{ marginTop: "1.5rem", borderTop: "1px solid var(--bg-surface0)", paddingTop: "1rem" }}>
+              <div style={{ fontSize: "0.85rem", fontWeight: 700, marginBottom: "0.5rem", color: "var(--accent)" }}>
+                🧪 Namuna testlar (Sample):
+              </div>
+              {sessionData.sample_tests.map((tc, idx) => (
+                <div key={idx} style={{ background: "var(--bg-crust)", padding: "0.6rem 0.75rem", borderRadius: 6, marginBottom: "0.5rem", fontSize: "0.82rem", fontFamily: "monospace" }}>
+                  <div><strong>Kirish:</strong> {tc.input}</div>
+                  <div><strong>Chiqish:</strong> {tc.expected}</div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
 
@@ -790,6 +818,48 @@ export default function Arena() {
                 isReadonly={isReadonly}
               />
             </>
+          ) : isQuiz ? (
+            /* Quiz Questions View */
+            <div style={{ flex: 1, padding: "1.75rem", overflow: "auto" }}>
+              <h3 style={{ marginBottom: "1rem", fontSize: "1rem", color: "var(--text-sub)" }}>
+                To'g'ri javob variantini tanlang:
+              </h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", maxWidth: "680px" }}>
+                {(sessionData?.options || []).map((opt, idx) => {
+                  const active = selectedOption === idx;
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      disabled={isReadonly}
+                      onClick={() => {
+                        setSelectedOption(idx);
+                        selectedOptionRef.current = idx;
+                        handleFirstInput();
+                      }}
+                      style={{
+                        textAlign: "left",
+                        padding: "1rem 1.25rem",
+                        borderRadius: "10px",
+                        border: `2px solid ${active ? "var(--accent)" : "var(--bg-surface1)"}`,
+                        background: active ? "rgba(137, 180, 250, 0.14)" : "var(--bg-mantle)",
+                        color: "var(--text-main)",
+                        cursor: isReadonly ? "default" : "pointer",
+                        fontSize: "0.95rem",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.75rem",
+                      }}
+                    >
+                      <span style={{ fontWeight: 700, color: active ? "var(--accent)" : "var(--text-muted)" }}>
+                        {String.fromCharCode(65 + idx)}.
+                      </span>
+                      <span>{opt}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           ) : (
             /* Theoretical Questions View */
             <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "1.25rem", overflow: "hidden" }}>

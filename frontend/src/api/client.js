@@ -73,6 +73,7 @@ export const api = {
 
   // Leaderboard
   getLeaderboard: (challengeId) => client.get(`/api/v1/challenges/${challengeId}/leaderboard`),
+  getMyRank: (challengeId) => client.get(`/api/v1/challenges/${challengeId}/my-rank`),
 
   // Admin
   getAdminChallenges: () => client.get('/api/admin/challenges'),
@@ -106,4 +107,8 @@ export const api = {
   getSubmissions: (params) => client.get('/api/admin/submissions', { params }),
   getSubmissionDetail: (id) => client.get(`/api/admin/submissions/${id}`),
   gradeSubmission: (id, data) => client.post(`/api/admin/submissions/${id}/grade`, data),
+  getFinalists: (challengeId) => client.get(`/api/admin/challenges/${challengeId}/finalists`),
+  setFinalResults: (challengeId, data) => client.post(`/api/admin/challenges/${challengeId}/final-result`, data),
+  markPrizePaid: (challengeId, userId) => client.post(`/api/admin/challenges/${challengeId}/prize-paid`, { user_id: userId }),
+  getSuspiciousActivity: () => client.get('/api/admin/suspicious'),
 };

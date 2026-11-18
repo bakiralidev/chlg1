@@ -23,6 +23,7 @@ import QuestionForm from './pages/admin/QuestionForm';
 import ScoreImport from './pages/admin/ScoreImport';
 import ParticipantsList from './pages/admin/ParticipantsList';
 import SubmissionsReview from './pages/admin/SubmissionsReview';
+import SuspiciousActivity from './pages/admin/SuspiciousActivity';
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -65,6 +66,7 @@ export default function App() {
           <Route path="/admin/participants" element={<ParticipantsList />} />
           <Route path="/admin/submissions" element={<SubmissionsReview />} />
           <Route path="/admin/scores" element={<ScoreImport />} />
+          <Route path="/admin/suspicious" element={<SuspiciousActivity />} />
         </Route>
 
         {/* Fallback */}
