@@ -165,6 +165,6 @@ git push -u origin fix/runner-isolation
 
 # Agar main branch'ga birlashtirmoqchi bo'lsangiz:
 git checkout main
-git merge fix/runner-and-rules   # yoki fix/runner-isolation
+git merge fix/runner-isolation
 git push origin main
 ```
