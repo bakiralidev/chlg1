@@ -36,11 +36,14 @@ async def execute_python_code(
         async with httpx.AsyncClient(timeout=limit + 3.0) as client:
             resp = await client.post(
                 url,
+                headers={"X-Runner-Key": settings.RUNNER_SHARED_SECRET},
                 json={"code": code, "stdin": input_data or "", "time_limit_s": limit},
             )
     except httpx.HTTPError:
         raise RunnerUnavailableError("Kod bajarish xizmati vaqtincha mavjud emas.")
 
+    if resp.status_code == 401:
+        raise RunnerUnavailableError("Kod bajarish xizmati autentifikatsiya xatosi.")
     if resp.status_code == 503:
         raise RunnerUnavailableError("Tizim band, birozdan keyin qayta urining.")
     if resp.status_code == 400:

@@ -2,16 +2,16 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN groupadd --gid 10002 runneruser && \
-    useradd --uid 10002 --gid 10002 --shell /bin/bash --create-home runneruser
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libseccomp2 \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py .
+COPY main.py seccomp_filter.py ./
 
-RUN chown -R runneruser:runneruser /app
-USER runneruser
+RUN chown -R root:root /app && chmod 700 /app && chmod 600 /app/main.py /app/seccomp_filter.py
 
 EXPOSE 8080
 
