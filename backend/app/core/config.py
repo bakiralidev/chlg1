@@ -22,12 +22,13 @@ class Settings(BaseSettings):
 
     # Security & Network
     ALLOWED_ORIGINS: str = ""
-    TRUSTED_PROXY_CIDRS: str = "172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,127.0.0.1/32"
+    TRUSTED_PROXY_CIDRS: str = "172.28.1.10/32,127.0.0.1/32"
     DEV_MODE: bool = False
 
     # Runner (Sandbox)
     RUNNER_URL: str = "http://runner:8080"
     RUNNER_TIMEOUT_SECS: float = 5.0
+    RUNNER_SHARED_SECRET: str = ""
 
     # Legacy SMTP (kept optional for backward compatibility)
     SMTP_HOST: str = "smtp.gmail.com"

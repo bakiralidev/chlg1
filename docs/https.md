@@ -34,3 +34,8 @@ docker compose up -d nginx
 ```bash
 0 3 * * * certbot renew --quiet && docker compose exec nginx nginx -s reload
 ```
+
+## 4. Ishonchli Proksi (Trusted Proxy)
+
+`docker-compose.yml` da `nginx` konteyneri `edge_net` tarmog'ida `172.28.1.10` manzilida ishlaydi. `.env` faylida `TRUSTED_PROXY_CIDRS=172.28.1.10/32,127.0.0.1/32` qilib belgilanishi shart, shunda `backend` faqat `nginx` dan kelgan `X-Forwarded-For` sarlavhasiga ishonadi.
+
