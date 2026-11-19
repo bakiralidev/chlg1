@@ -359,20 +359,74 @@ def test_import_questions_validation():
 
 def test_sandbox_runner_security_in_process():
     """
-    Test runner/main.py directly against malicious code payloads.
-    Note: container-level network/filesystem/rlimit isolation is enforced by Docker Compose & Linux rlimits.
+    Unit tests for runner/main.py:
+    - verify_runner_key (401 on missing/wrong, passes on valid)
+    - SlotPool unique UID/GID allocation & release
+    - _read_stream_capped 64 KB streaming truncation
+    - seccomp_filter constants
     """
     import sys
     runner_dir = str(Path(__file__).resolve().parents[2] / "runner")
     if runner_dir not in sys.path:
         sys.path.insert(0, runner_dir)
     import main as runner_main
+    import seccomp_filter
 
-    # Verify env isolation & timeout logic exist in runner/main.py
-    src = Path(runner_dir, "main.py").read_text(encoding="utf-8")
-    assert "RLIMIT_NPROC" in src
-    assert "RLIMIT_AS" in src
-    assert "RLIMIT_FSIZE" in src
-    assert "MAX_CODE_BYTES = 50 * 1024" in src
-    assert "MAX_OUTPUT_BYTES = 64 * 1024" in src
-    assert runner_main._truncate_bytes(b"x" * (70 * 1024))[1] is True
+    # 1. Auth verification
+    orig_secret = runner_main.RUNNER_SHARED_SECRET
+    try:
+        runner_main.RUNNER_SHARED_SECRET = "test_secret_123"
+        runner_main.verify_runner_key("test_secret_123")
+        with pytest.raises(HTTPException) as e1:
+            runner_main.verify_runner_key(None)
+        assert e1.value.status_code == 401
+        with pytest.raises(HTTPException) as e2:
+            runner_main.verify_runner_key("wrong")
+        assert e2.value.status_code == 401
+    finally:
+        runner_main.RUNNER_SHARED_SECRET = orig_secret
+
+    # 2. SlotPool unique UID/GID allocation
+    async def _test_slots():
+        pool = runner_main.SlotPool(num_slots=3, base_uid=20000)
+        s1, u1, g1 = await pool.acquire_slot()
+        s2, u2, g2 = await pool.acquire_slot()
+        assert u1 != u2 and g1 != g2
+        assert u1 >= 20000 and u2 >= 20000
+        await pool.release_slot(s1)
+        s3, u3, _ = await pool.acquire_slot()
+        assert u3 != u2
+        s4, u4, _ = await pool.acquire_slot()
+        assert u4 == u1
+        await pool.release_slot(s2)
+        await pool.release_slot(s3)
+        await pool.release_slot(s4)
+
+    run_coro(_test_slots())
+
+    # 3. Streaming 64 KB cap
+    class _FakeStream:
+        def __init__(self, chunks):
+            self._chunks = list(chunks)
+
+        async def read(self, _n):
+            return self._chunks.pop(0) if self._chunks else b""
+
+    class _FakeProc:
+        pid = None
+
+    async def _test_stream():
+        buf = bytearray()
+        state = {"total": 0, "truncated": False}
+        stream = _FakeStream([b"x" * 40000, b"y" * 40000])
+        await runner_main._read_stream_capped(stream, buf, state, _FakeProc(), max_bytes=65536)
+        assert state["truncated"] is True
+        assert state["total"] == 65536
+        assert len(buf) == 65536
+
+    run_coro(_test_stream())
+
+    # 4. Seccomp filter blocked domains & syscalls present
+    assert "connect" in seccomp_filter._BLOCKED_SYSCALLS
+    assert "ptrace" in seccomp_filter._BLOCKED_SYSCALLS
+    assert 2 in seccomp_filter._BLOCKED_SOCKET_DOMAINS  # AF_INET
