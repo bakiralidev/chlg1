@@ -154,6 +154,17 @@ async def _execute_isolated(code: str, stdin_text: str, time_limit_s: float) -> 
             stderr_bytes = f"Vaqt chegarasidan oshib ketdi (Timeout {time_limit_s}s).".encode("utf-8")
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+        if os.name != "nt":
+            try:
+                for entry in os.listdir("/tmp"):
+                    if not entry.startswith("run_"):
+                        p = os.path.join("/tmp", entry)
+                        if os.path.isdir(p) and not os.path.islink(p):
+                            shutil.rmtree(p, ignore_errors=True)
+                        else:
+                            os.unlink(p)
+            except Exception:
+                pass
 
     duration_ms = int((time.monotonic() - start_time) * 1000)
     stdout_str, trunc_out = _truncate_bytes(stdout_bytes)
