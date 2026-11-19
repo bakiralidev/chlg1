@@ -57,8 +57,50 @@ _BLOCKED_SYSCALLS = (
 )
 
 
+_LIBC = None
+_LIBSECCOMP = None
+
+
+def _get_libc():
+    global _LIBC
+    if _LIBC is None:
+        _LIBC = ctypes.CDLL("libc.so.6", use_errno=True)
+    return _LIBC
+
+
+def _get_libseccomp():
+    global _LIBSECCOMP
+    if _LIBSECCOMP is None:
+        lib = ctypes.CDLL("libseccomp.so.2", use_errno=True)
+        lib.seccomp_init.argtypes = [ctypes.c_uint32]
+        lib.seccomp_init.restype = ctypes.c_void_p
+        lib.seccomp_release.argtypes = [ctypes.c_void_p]
+        lib.seccomp_release.restype = None
+        lib.seccomp_load.argtypes = [ctypes.c_void_p]
+        lib.seccomp_load.restype = ctypes.c_int
+        lib.seccomp_syscall_resolve_name.argtypes = [ctypes.c_char_p]
+        lib.seccomp_syscall_resolve_name.restype = ctypes.c_int
+        lib.seccomp_rule_add_array.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_int,
+            ctypes.c_uint,
+            ctypes.POINTER(ScmpArgCmp),
+        ]
+        lib.seccomp_rule_add_array.restype = ctypes.c_int
+        _LIBSECCOMP = lib
+    return _LIBSECCOMP
+
+
+try:
+    _get_libc()
+    _get_libseccomp()
+except OSError:
+    pass
+
+
 def drop_bounding_caps_and_no_new_privs() -> None:
-    libc = ctypes.CDLL("libc.so.6", use_errno=True)
+    libc = _get_libc()
     for cap in range(0, 45):
         libc.prctl(PR_CAPBSET_DROP, cap, 0, 0, 0)
     if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
@@ -68,23 +110,7 @@ def drop_bounding_caps_and_no_new_privs() -> None:
 
 def install_sandbox_seccomp() -> None:
     """Install seccomp-bpf filter in the sandbox child process using libseccomp.so.2."""
-    lib = ctypes.CDLL("libseccomp.so.2", use_errno=True)
-    lib.seccomp_init.argtypes = [ctypes.c_uint32]
-    lib.seccomp_init.restype = ctypes.c_void_p
-    lib.seccomp_release.argtypes = [ctypes.c_void_p]
-    lib.seccomp_release.restype = None
-    lib.seccomp_load.argtypes = [ctypes.c_void_p]
-    lib.seccomp_load.restype = ctypes.c_int
-    lib.seccomp_syscall_resolve_name.argtypes = [ctypes.c_char_p]
-    lib.seccomp_syscall_resolve_name.restype = ctypes.c_int
-    lib.seccomp_rule_add_array.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-        ctypes.c_int,
-        ctypes.c_uint,
-        ctypes.POINTER(ScmpArgCmp),
-    ]
-    lib.seccomp_rule_add_array.restype = ctypes.c_int
+    lib = _get_libseccomp()
 
     ctx = lib.seccomp_init(SCMP_ACT_ALLOW)
     if not ctx:

@@ -37,6 +37,7 @@ services:
       - SETGID
       - CHOWN
       - DAC_OVERRIDE
+      - KILL
     security_opt:
       - no-new-privileges:true
     pids_limit: 128

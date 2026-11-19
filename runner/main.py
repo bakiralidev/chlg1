@@ -12,12 +12,20 @@ from collections import deque
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from seccomp_filter import drop_bounding_caps_and_no_new_privs, install_sandbox_seccomp
+
 MAX_CODE_BYTES = 50 * 1024       # 50 KB
 MAX_OUTPUT_BYTES = 64 * 1024     # 64 KB
 MAX_CONCURRENT_RUNS = 8
 MAX_QUEUE_WAITING = 16
 BASE_SANDBOX_UID = 20000
 RUNNER_SHARED_SECRET = os.environ.get("RUNNER_SHARED_SECRET", "")
+
+if os.name != "nt" and os.geteuid() == 0:
+    try:
+        os.chmod("/tmp", 0o711)
+    except OSError:
+        pass
 
 app = FastAPI(title="PyChallenge Isolated Runner", docs_url=None, redoc_url=None)
 
@@ -103,14 +111,12 @@ def _apply_posix_limits(time_limit_s: float) -> None:
 
 
 def _sandbox_child_preexec(slot_uid: int, slot_gid: int, time_limit_s: float) -> None:
-    from seccomp_filter import drop_bounding_caps_and_no_new_privs, install_sandbox_seccomp
-
     os.setgroups([])
     os.setgid(slot_gid)
     os.setuid(slot_uid)
     drop_bounding_caps_and_no_new_privs()
-    _apply_posix_limits(time_limit_s)
     install_sandbox_seccomp()
+    _apply_posix_limits(time_limit_s)
 
 
 def _kill_process_group(proc) -> None:
